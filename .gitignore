@@ -1,0 +1,29 @@
+# Test documents
+Test_Docs/
+TestDocument.docx
+TestDocument - copia.zip
+Test.ipynb
+
+# Environment variables
+*.env
+
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/*
+
+# Output directories
+Translated_Docs/
+
+# Archives
+*.zip
+
+# Text files
+*.txt
+README.md
