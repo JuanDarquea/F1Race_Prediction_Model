@@ -5,7 +5,6 @@ from typing import Iterable, List, Optional
 import fastf1
 import pandas as pd
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = PROJECT_ROOT / "data" / "fastf1_cache"
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "fastf1"
@@ -23,7 +22,14 @@ def _normalize_laps(laps: pd.DataFrame, session_meta: dict) -> pd.DataFrame:
     df = laps.copy()
 
     # Convert timedelta columns to seconds for easier ML usage.
-    for col in ["LapTime", "Sector1Time", "Sector2Time", "Sector3Time", "PitInTime", "PitOutTime"]:
+    for col in [
+        "LapTime",
+        "Sector1Time",
+        "Sector2Time",
+        "Sector3Time",
+        "PitInTime",
+        "PitOutTime",
+    ]:
         if col in df.columns and pd.api.types.is_timedelta64_dtype(df[col]):
             df[f"{col}Seconds"] = _to_seconds(df[col])
 
@@ -71,15 +77,19 @@ def _save_results(session, out_dir: Path) -> Optional[Path]:
 
 def _save_drivers(session, out_dir: Path) -> Optional[Path]:
     if session.results is not None and not session.results.empty:
-        drivers_df = session.results[[
-            "DriverNumber",
-            "Abbreviation",
-            "FullName",
-            "TeamName",
-        ]].drop_duplicates()
+        drivers_df = session.results[
+            [
+                "DriverNumber",
+                "Abbreviation",
+                "FullName",
+                "TeamName",
+            ]
+        ].drop_duplicates()
     elif session.laps is not None and not session.laps.empty:
         columns = [
-            col for col in ["DriverNumber", "Driver", "Abbreviation", "Team"] if col in session.laps.columns
+            col
+            for col in ["DriverNumber", "Driver", "Abbreviation", "Team"]
+            if col in session.laps.columns
         ]
         if not columns:
             return None
@@ -120,18 +130,26 @@ def collect_for_seasons(
 
         for _, row in schedule.iterrows():
             round_number = int(row["RoundNumber"])
-            event_name = str(row["EventName"])
+            event_name_stripped = str(row["EventName"]).split()
+            event_name = "_".join(event_name_stripped)
 
             for session_code in session_codes:
                 try:
                     session = _load_session(year, round_number, session_code)
-                except Exception as exc:  # FastF1 raises various errors for missing sessions
+                except (
+                    Exception
+                ) as exc:  # FastF1 raises various errors for missing sessions
                     print(
                         f"[skip] {year} {event_name} ({round_number}) {session_code}: {exc}"
                     )
                     continue
 
-                out_dir = RAW_DIR / str(year) / f"{round_number:02d}_{event_name}" / session_code
+                out_dir = (
+                    RAW_DIR
+                    / str(year)
+                    / f"{round_number:02d}_{event_name}"
+                    / session_code
+                )
                 _safe_mkdir(out_dir)
 
                 laps_path = _save_laps(session, out_dir)
@@ -142,7 +160,6 @@ def collect_for_seasons(
                     f"[ok] {year} {event_name} ({round_number}) {session_code} -> "
                     f"laps={bool(laps_path)}, results={bool(results_path)}, drivers={bool(drivers_path)}"
                 )
-
 
 
 def _parse_args() -> argparse.Namespace:
