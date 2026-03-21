@@ -27,3 +27,6 @@ Translated_Docs/
 # Text files
 *.txt
 README.md
+
+# Data files
+data/
