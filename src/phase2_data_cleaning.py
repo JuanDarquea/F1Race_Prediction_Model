@@ -176,10 +176,11 @@ def main() -> None:
     if args.split_by_year:
         output_path = Path(args.output)
         for year, subset in cleaned.groupby("season", dropna=True):
-            if year is None:
+            if pd.isna(year):
                 continue
+            year_int = int(year)
             year_path = output_path.with_name(
-                f"{output_path.stem}_{int(year)}{output_path.suffix}"
+                f"{output_path.stem}_{year_int}{output_path.suffix}"
             )
             subset.to_csv(year_path, index=False)
             print(f"Saved cleaned dataset -> {year_path} ({len(subset)} rows)")
