@@ -149,6 +149,16 @@ def _parse_args() -> argparse.Namespace:
         help="Also write one cleaned CSV per season.",
     )
     parser.add_argument(
+        "--aggregate-by-driver",
+        action="store_true",
+        help="Write a per-driver aggregated dataset.",
+    )
+    parser.add_argument(
+        "--aggregate-by-circuit",
+        action="store_true",
+        help="Write a per-circuit aggregated dataset.",
+    )
+    parser.add_argument(
         "--output",
         default=str(CLEAN_DIR / "fastf1_race_laps_clean.csv"),
         help="Output CSV path",
@@ -166,11 +176,60 @@ def main() -> None:
     if args.split_by_year:
         output_path = Path(args.output)
         for year, subset in cleaned.groupby("season", dropna=True):
+            if year is None:
+                continue
             year_path = output_path.with_name(
                 f"{output_path.stem}_{int(year)}{output_path.suffix}"
             )
             subset.to_csv(year_path, index=False)
             print(f"Saved cleaned dataset -> {year_path} ({len(subset)} rows)")
+
+    output_path = Path(args.output)
+    cleaned_non_null = cleaned.dropna(subset=["lap_time"])
+
+    if args.aggregate_by_driver:
+        by_driver = (
+            cleaned_non_null.groupby("driver", dropna=True)
+            .agg(
+                team=("team", "first"),
+                seasons=("season", "nunique"),
+                races=("round", "nunique"),
+                laps=("lap_time", "count"),
+                avg_lap_time=("lap_time", "mean"),
+                best_lap_time=("lap_time", "min"),
+                median_lap_time=("lap_time", "median"),
+                lap_time_std=("lap_time", "std"),
+                dnfs=("dnf", "sum"),
+            )
+            .reset_index()
+        )
+        by_driver_path = output_path.with_name(
+            f"{output_path.stem}_by_driver{output_path.suffix}"
+        )
+        by_driver.to_csv(by_driver_path, index=False)
+        print(f"Saved aggregated dataset -> {by_driver_path} ({len(by_driver)} rows)")
+
+    if args.aggregate_by_circuit:
+        by_circuit = (
+            cleaned_non_null.groupby("track", dropna=True)
+            .agg(
+                seasons=("season", "nunique"),
+                races=("round", "nunique"),
+                drivers=("driver", "nunique"),
+                laps=("lap_time", "count"),
+                avg_lap_time=("lap_time", "mean"),
+                best_lap_time=("lap_time", "min"),
+                median_lap_time=("lap_time", "median"),
+                lap_time_std=("lap_time", "std"),
+                dnfs=("dnf", "sum"),
+            )
+            .reset_index()
+        )
+        by_circuit_path = output_path.with_name(
+            f"{output_path.stem}_by_circuit{output_path.suffix}"
+        )
+        by_circuit.to_csv(by_circuit_path, index=False)
+        print(f"Saved aggregated dataset -> {by_circuit_path} ({len(by_circuit)} rows)")
 
 
 if __name__ == "__main__":
