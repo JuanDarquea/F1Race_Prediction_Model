@@ -45,3 +45,105 @@ Version Control: Git & GitHub
 ```
 
 This project is a living document of my growth in AI and Data Science. As I refine the feature selection and explore more advanced ensemble methods, the model will be updated to reflect higher accuracy.
+
+## Project Phases (Current Setup)
+
+### Phase 1 - Data Collection
+Script: `src/phase1_data_collection.py`
+
+What it does:
+- Installs and uses FastF1 cache
+- Downloads sessions for multiple seasons
+- Extracts laps, drivers, and positions
+- Saves raw CSVs per session
+
+Example:
+```bash
+python src/phase1_data_collection.py --years 2022 2023 --sessions FP1 Q R
+```
+
+Outputs (example):
+```
+data/raw/fastf1/
+  2022/01_Bahrain/FP1/laps.csv
+  2022/01_Bahrain/Q/results.csv
+  2022/01_Bahrain/R/drivers.csv
+```
+
+### Phase 2 - Data Cleaning
+Script: `src/phase2_data_cleaning.py`
+
+What it does:
+- Combines all race lap data into a single dataset
+- Handles missing values (NaN lap times, DNFs)
+- Standardizes key columns
+- Adds `driver_name` for easier analysis
+- Optional per-year and aggregated outputs
+
+Example (basic clean):
+```bash
+python src/phase2_data_cleaning.py
+```
+
+Example (split by year + aggregates):
+```bash
+python src/phase2_data_cleaning.py --split-by-year --aggregate-by-driver --aggregate-by-circuit
+```
+
+Outputs:
+```
+data/clean/fastf1_race_laps_clean.csv
+data/clean/fastf1_race_laps_clean_2022.csv (optional)
+data/clean/fastf1_race_laps_clean_by_driver.csv (optional)
+data/clean/fastf1_race_laps_clean_by_circuit.csv (optional)
+```
+
+Standardized columns:
+- driver
+- driver_name
+- team
+- track
+- grand_prix
+- season
+- round
+- session
+- position
+- lap_time
+- lap_number
+- dnf
+
+### Phase 3 - Exploratory Data Analysis (EDA)
+Script: `src/phase3_eda.py`
+
+What it does:
+- Average finishing position per driver
+- Team performance trends
+- Track difficulty (DNF rate + lap time variation)
+- Qualifying vs race correlation
+- Driver consistency
+
+Example:
+```bash
+python src/phase3_eda.py
+```
+
+Outputs:
+```
+data/eda/avg_finish_by_driver.csv
+data/eda/team_trends.csv
+data/eda/track_difficulty.csv
+data/eda/driver_consistency.csv
+data/eda/avg_finish_positions.png
+data/eda/lap_time_distribution.png
+data/eda/qual_vs_race_scatter.png
+data/eda/summary.txt
+```
+
+## Notes
+- If Phase 2 fails, check that you already ran Phase 1 and that `data/raw/fastf1` exists.
+- Driver names are preferred for analysis because driver numbers can change across seasons.
+
+## Troubleshooting
+- Phase 1 errors about missing sessions: Some events do not have every session type. Try limiting sessions (e.g., `--sessions Q R`) or use fewer rounds with `--max-rounds`.
+- Phase 2 “no race lap files found”: Run Phase 1 first and confirm `data/raw/fastf1/**/R/laps.csv` exists.
+- Empty EDA outputs: Ensure you have both qualifying and race results in `data/raw/fastf1` (run Phase 1 with `--sessions Q R`).
