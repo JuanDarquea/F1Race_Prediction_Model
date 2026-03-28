@@ -27,9 +27,19 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     driver_key = _pick_driver_key(df)
     lap_time_col = "LapTimeSeconds" if "LapTimeSeconds" in df.columns else "LapTime"
 
+    if "FullName" in df.columns:
+        driver_name = df["FullName"]
+    elif "Abbreviation" in df.columns:
+        driver_name = df["Abbreviation"]
+    elif "Driver" in df.columns:
+        driver_name = df["Driver"]
+    else:
+        driver_name = df[driver_key]
+
     standardized = pd.DataFrame(
         {
             "driver": df[driver_key],
+            "driver_name": driver_name,
             "team": df.get("Team", pd.NA),
             "track": df.get("EventName", pd.NA),
             "grand_prix": df.get("EventName", pd.NA),
@@ -48,6 +58,7 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _coerce_types(df: pd.DataFrame) -> pd.DataFrame:
     df["driver"] = df["driver"].astype("string")
+    df["driver_name"] = df["driver_name"].astype("string")
     df["team"] = df["team"].astype("string")
     df["track"] = df["track"].astype("string")
     df["grand_prix"] = df["grand_prix"].astype("string")
@@ -100,6 +111,22 @@ def _infer_dnf(results: pd.DataFrame, driver_key: str) -> pd.DataFrame:
     return pd.DataFrame({"driver_key": results[driver_key], "dnf": dnf})
 
 
+def _infer_driver_name(results: pd.DataFrame, driver_key: str) -> pd.DataFrame:
+    if results is None or results.empty:
+        return pd.DataFrame(columns=["driver_key", "driver_name"])
+
+    if "FullName" in results.columns:
+        driver_name = results["FullName"]
+    elif "Abbreviation" in results.columns:
+        driver_name = results["Abbreviation"]
+    elif "Driver" in results.columns:
+        driver_name = results["Driver"]
+    else:
+        driver_name = results[driver_key]
+
+    return pd.DataFrame({"driver_key": results[driver_key], "driver_name": driver_name})
+
+
 def _build_from_lap_file(path: Path) -> pd.DataFrame:
     raw = pd.read_csv(path)
     standardized = _standardize_columns(raw)
@@ -109,6 +136,15 @@ def _build_from_lap_file(path: Path) -> pd.DataFrame:
     if results is not None and driver_key in results.columns:
         dnf_map = _infer_dnf(results, driver_key)
         standardized = standardized.merge(dnf_map, on="driver_key", how="left")
+        name_map = _infer_driver_name(results, driver_key)
+        standardized = standardized.merge(
+            name_map, on="driver_key", how="left", suffixes=("", "_results")
+        )
+        if "driver_name_results" in standardized.columns:
+            standardized["driver_name"] = standardized[
+                "driver_name_results"
+            ].combine_first(standardized["driver_name"])
+            standardized.drop(columns=["driver_name_results"], inplace=True)
     else:
         standardized["dnf"] = pd.NA
 
@@ -190,8 +226,9 @@ def main() -> None:
 
     if args.aggregate_by_driver:
         by_driver = (
-            cleaned_non_null.groupby("driver", dropna=True)
+            cleaned_non_null.groupby("driver_name", dropna=True)
             .agg(
+                driver_id=("driver", "first"),
                 team=("team", "first"),
                 seasons=("season", "nunique"),
                 races=("round", "nunique"),
