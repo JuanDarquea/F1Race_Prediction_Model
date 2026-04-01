@@ -4,6 +4,7 @@ from typing import Iterable, List, Optional
 
 import fastf1
 import pandas as pd
+from fastf1 import exceptions as f1_exceptions
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = PROJECT_ROOT / "data" / "fastf1_cache"
@@ -52,7 +53,10 @@ def _session_meta(session) -> dict:
 
 
 def _save_laps(session, out_dir: Path) -> Optional[Path]:
-    if session.laps is None or session.laps.empty:
+    try:
+        if session.laps is None or session.laps.empty:
+            return None
+    except f1_exceptions.DataNotLoadedError:
         return None
 
     df = _normalize_laps(session.laps, _session_meta(session))
@@ -62,7 +66,10 @@ def _save_laps(session, out_dir: Path) -> Optional[Path]:
 
 
 def _save_results(session, out_dir: Path) -> Optional[Path]:
-    if session.results is None or session.results.empty:
+    try:
+        if session.results is None or session.results.empty:
+            return None
+    except f1_exceptions.DataNotLoadedError:
         return None
 
     df = session.results.copy()
@@ -76,7 +83,12 @@ def _save_results(session, out_dir: Path) -> Optional[Path]:
 
 
 def _save_drivers(session, out_dir: Path) -> Optional[Path]:
-    if session.results is not None and not session.results.empty:
+    try:
+        results = session.results
+    except f1_exceptions.DataNotLoadedError:
+        results = None
+
+    if results is not None and not results.empty:
         drivers_df = session.results[
             [
                 "DriverNumber",
@@ -85,7 +97,13 @@ def _save_drivers(session, out_dir: Path) -> Optional[Path]:
                 "TeamName",
             ]
         ].drop_duplicates()
-    elif session.laps is not None and not session.laps.empty:
+    else:
+        try:
+            laps = session.laps
+        except f1_exceptions.DataNotLoadedError:
+            laps = None
+
+    if results is None and laps is not None and not laps.empty:
         columns = [
             col
             for col in ["DriverNumber", "Driver", "Abbreviation", "Team"]
@@ -94,7 +112,7 @@ def _save_drivers(session, out_dir: Path) -> Optional[Path]:
         if not columns:
             return None
         drivers_df = session.laps[columns].drop_duplicates()
-    else:
+    elif results is None:
         return None
 
     meta = _session_meta(session)
