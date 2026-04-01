@@ -59,7 +59,7 @@ What it does:
 
 Example:
 ```bash
-python src/phase1_data_collection.py --years 2022 2023 --sessions FP1 Q R
+python src/phase1_data_collection.py --years 2023 2024 2025 --sessions FP1 FP2 FP3 SQ S Q R
 ```
 
 Outputs (example):
@@ -85,9 +85,9 @@ Example (basic clean):
 python src/phase2_data_cleaning.py
 ```
 
-Example (split by year + aggregates):
+Example (include sprint laps, split by year + aggregates):
 ```bash
-python src/phase2_data_cleaning.py --split-by-year --aggregate-by-driver --aggregate-by-circuit
+python src/phase2_data_cleaning.py --sessions R S --split-by-year --aggregate-by-driver --aggregate-by-circuit
 ```
 
 Outputs:
@@ -130,18 +130,46 @@ python src/phase3_eda.py
 Outputs:
 ```
 data/eda/avg_finish_by_driver.csv
+data/eda/avg_sprint_finish_by_driver.csv
 data/eda/team_trends.csv
 data/eda/track_difficulty.csv
 data/eda/driver_consistency.csv
 data/eda/avg_finish_positions.png
+data/eda/avg_sprint_finish_positions.png
 data/eda/lap_time_distribution.png
 data/eda/qual_vs_race_scatter.png
+data/eda/sprint_vs_race_scatter.png
 data/eda/summary.txt
 ```
+
+### Phase 4 - Feature Engineering
+Script: `src/phase4_feature_engineering.py`
+
+What it does:
+- Builds per-driver/per-race feature rows
+- Adds sprint weekend features (sprint result + sprint qualifying)
+- Adds practice pace, track types, and rolling driver/team stats
+
+Example:
+```bash
+python src/phase4_feature_engineering.py
+```
+
+Outputs:
+```
+data/features/feature_dataset.csv
+data/track_types.csv
+```
+
+Sprint weekend columns:
+- sprint_position
+- sprint_points
+- sprint_qualifying_position
 
 ## Notes
 - If Phase 2 fails, check that you already ran Phase 1 and that `data/raw/fastf1` exists.
 - Driver names are preferred for analysis because driver numbers can change across seasons.
+- Track types are stored in `data/track_types.csv` (street vs race circuits) and used in Phase 4.
 
 ## Troubleshooting
 - Phase 1 errors about missing sessions: Some events do not have every session type. Try limiting sessions (e.g., `--sessions Q R`) or use fewer rounds with `--max-rounds`.

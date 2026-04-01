@@ -164,7 +164,7 @@ def collect_for_seasons(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Phase 1: collect raw F1 session data with FastF1",
+        description="Phase 1: collect raw F1 session data with FastF1 (including sprint weekends)",
     )
     parser.add_argument(
         "--years",
@@ -176,8 +176,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sessions",
         nargs="+",
-        default=["FP1", "Q", "R"],
-        help="Session codes to fetch (default: FP1 Q R)",
+        default=["FP1", "FP2", "FP3", "SQ", "S", "Q", "R"],
+        help="Session codes to fetch (default: FP1 FP2 FP3 SQ S Q R)",
     )
     parser.add_argument(
         "--rounds",

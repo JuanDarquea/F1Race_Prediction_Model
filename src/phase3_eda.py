@@ -142,12 +142,12 @@ def analyze_track_difficulty(
     return track_difficulty.sort_values(["dnf_rate", "avg_lap_time"], ascending=False)
 
 
-def plot_finish_positions(avg_finish: pd.DataFrame, out_path: Path) -> None:
+def plot_finish_positions(avg_finish: pd.DataFrame, out_path: Path, title: str) -> None:
     top = avg_finish.head(15)
     plt.figure(figsize=(10, 6))
     plt.barh(top["driver_name"], top["avg_position"])
     plt.gca().invert_yaxis()
-    plt.title("Average Race Finish Position (Top 15)")
+    plt.title(title)
     plt.xlabel("Average Position (Lower is Better)")
     plt.tight_layout()
     plt.savefig(out_path)
@@ -197,6 +197,40 @@ def plot_qualifying_vs_race(
     return corr
 
 
+def plot_sprint_vs_race(
+    sprint_results: pd.DataFrame, race_results: pd.DataFrame, out_path: Path
+) -> float:
+    sprint_results = sprint_results.dropna(
+        subset=["position", "season", "round", "driver_id"]
+    )
+    race_results = race_results.dropna(
+        subset=["position", "season", "round", "driver_id"]
+    )
+
+    merged = sprint_results.merge(
+        race_results,
+        on=["season", "round", "driver_id"],
+        suffixes=("_sprint", "_race"),
+        how="inner",
+    )
+
+    if merged.empty:
+        return float("nan")
+
+    corr = merged["position_sprint"].corr(merged["position_race"], method="spearman")
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(merged["position_sprint"], merged["position_race"], alpha=0.4)
+    plt.title("Sprint vs Race Finish Position")
+    plt.xlabel("Sprint Finish Position")
+    plt.ylabel("Race Finish Position")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+    return corr
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 3: Exploratory data analysis")
     parser.add_argument(
@@ -216,21 +250,37 @@ def main() -> None:
     laps = pd.read_csv(args.cleaned_path)
     race_results = _load_results("R")
     qual_results = _load_results("Q")
+    sprint_results = _load_results("S")
 
     avg_finish = analyze_average_finish(race_results)
     team_trends = analyze_team_trends(race_results)
     track_difficulty = analyze_track_difficulty(race_results, laps)
+    avg_sprint_finish = analyze_average_finish(sprint_results)
 
     avg_finish.to_csv(EDA_DIR / "avg_finish_by_driver.csv", index=False)
     team_trends.to_csv(EDA_DIR / "team_trends.csv", index=False)
     track_difficulty.to_csv(EDA_DIR / "track_difficulty.csv", index=False)
+    avg_sprint_finish.to_csv(EDA_DIR / "avg_sprint_finish_by_driver.csv", index=False)
 
-    plot_finish_positions(avg_finish, EDA_DIR / "avg_finish_positions.png")
+    plot_finish_positions(
+        avg_finish,
+        EDA_DIR / "avg_finish_positions.png",
+        "Average Race Finish Position (Top 15)",
+    )
+    if not avg_sprint_finish.empty:
+        plot_finish_positions(
+            avg_sprint_finish,
+            EDA_DIR / "avg_sprint_finish_positions.png",
+            "Average Sprint Finish Position (Top 15)",
+        )
     plot_lap_times(laps, EDA_DIR / "lap_time_distribution.png")
     spearman_corr = plot_qualifying_vs_race(
         qual_results,
         race_results,
         EDA_DIR / "qual_vs_race_scatter.png",
+    )
+    sprint_corr = plot_sprint_vs_race(
+        sprint_results, race_results, EDA_DIR / "sprint_vs_race_scatter.png"
     )
 
     consistency = (
@@ -251,6 +301,10 @@ def main() -> None:
         f.write("Phase 3 EDA Summary\n")
         f.write("===================\n\n")
         f.write(f"Qualifying vs Race Spearman correlation: {spearman_corr:.3f}\n")
+        if pd.isna(sprint_corr):
+            f.write("Sprint vs Race Spearman correlation: n/a (no sprint data)\n")
+        else:
+            f.write(f"Sprint vs Race Spearman correlation: {sprint_corr:.3f}\n")
         f.write("Lower position_std means more consistent finishes.\n")
 
     print(f"EDA outputs saved in {EDA_DIR}")

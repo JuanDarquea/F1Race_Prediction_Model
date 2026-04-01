@@ -9,8 +9,11 @@ RAW_DIR = PROJECT_ROOT / "data" / "raw" / "fastf1"
 CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
 
 
-def _find_lap_files() -> List[Path]:
-    return sorted(RAW_DIR.glob("*/**/R/laps.csv"))
+def _find_lap_files(session_codes: List[str]) -> List[Path]:
+    lap_files: List[Path] = []
+    for code in session_codes:
+        lap_files.extend(RAW_DIR.glob(f"*/**/{code}/laps.csv"))
+    return sorted(lap_files)
 
 
 def _pick_driver_key(df: pd.DataFrame) -> str:
@@ -152,11 +155,16 @@ def _build_from_lap_file(path: Path) -> pd.DataFrame:
     return standardized
 
 
-def build_clean_dataset(drop_missing: bool = True) -> pd.DataFrame:
-    lap_files = _find_lap_files()
+def build_clean_dataset(
+    drop_missing: bool = True, session_codes: Optional[List[str]] = None
+) -> pd.DataFrame:
+    if session_codes is None:
+        session_codes = ["R", "S"]
+    lap_files = _find_lap_files(session_codes)
     if not lap_files:
         raise FileNotFoundError(
-            "No race lap files found. Run phase1_data_collection.py first to populate data/raw/fastf1."
+            "No lap files found for the requested sessions. "
+            "Run phase1_data_collection.py first to populate data/raw/fastf1."
         )
 
     frames = []
@@ -172,7 +180,7 @@ def build_clean_dataset(drop_missing: bool = True) -> pd.DataFrame:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Phase 2: clean and combine race lap data"
+        description="Phase 2: clean and combine race/sprint lap data"
     )
     parser.add_argument(
         "--keep-missing",
@@ -183,6 +191,12 @@ def _parse_args() -> argparse.Namespace:
         "--split-by-year",
         action="store_true",
         help="Also write one cleaned CSV per season.",
+    )
+    parser.add_argument(
+        "--sessions",
+        nargs="+",
+        default=["R", "S"],
+        help="Session codes to include (default: R S).",
     )
     parser.add_argument(
         "--aggregate-by-driver",
@@ -205,7 +219,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
-    cleaned = build_clean_dataset(drop_missing=not args.keep_missing)
+    cleaned = build_clean_dataset(
+        drop_missing=not args.keep_missing, session_codes=args.sessions
+    )
     cleaned.to_csv(args.output, index=False)
     print(f"Saved cleaned dataset -> {args.output} ({len(cleaned)} rows)")
 
