@@ -166,6 +166,44 @@ Sprint weekend columns:
 - sprint_points
 - sprint_qualifying_position
 
+### Phase 5 - First ML Model
+Script: `src/phase5_model_training.py`
+
+What it does:
+- Trains XGBoost on 2023–2024 and tests on 2025
+- Predicts race positions and ranks drivers per race
+- Optional Top-10 classification output, confusion matrix, and visualization
+
+Example (basic training):
+```bash
+python src/phase5_model_training.py
+```
+
+Example (Top-10 classification + confusion outputs):
+```bash
+python src/phase5_model_training.py --top10-classification
+```
+
+Outputs:
+```
+models/phase5_xgboost.json
+models/phase5_predictions_2025.csv
+models/phase5_report.txt
+models/phase5_top10_classification_2025.csv (optional)
+models/phase5_top10_confusion_by_race_2025.csv (optional)
+models/phase5_top10_confusion_matrix.png (optional)
+```
+
+Prediction columns (2025):
+- driver_name
+- team
+- season
+- round
+- grand_prix_name
+- race_position
+- predicted_position
+- predicted_rank
+
 ## Notes
 - If Phase 2 fails, check that you already ran Phase 1 and that `data/raw/fastf1` exists.
 - Driver names are preferred for analysis because driver numbers can change across seasons.
