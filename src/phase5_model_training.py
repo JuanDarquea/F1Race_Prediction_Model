@@ -80,6 +80,103 @@ def _top10_metrics(pred_df: pd.DataFrame) -> dict:
     }
 
 
+def _top10_confusion(pred_df: pd.DataFrame) -> dict:
+    per_race = pred_df.groupby(["season", "round"], dropna=True)
+    tp_total = fp_total = fn_total = tn_total = 0
+
+    for _, group in per_race:
+        if group.empty:
+            continue
+        true_top10 = set(group.nsmallest(10, "race_position").index)
+        pred_top10 = set(group.nsmallest(10, "predicted_position").index)
+
+        for idx in group.index:
+            is_true = idx in true_top10
+            is_pred = idx in pred_top10
+            if is_true and is_pred:
+                tp_total += 1
+            elif is_pred and not is_true:
+                fp_total += 1
+            elif is_true and not is_pred:
+                fn_total += 1
+            else:
+                tn_total += 1
+
+    total = tp_total + fp_total + fn_total + tn_total
+    accuracy = (tp_total + tn_total) / total if total else float("nan")
+    return {
+        "tp": tp_total,
+        "fp": fp_total,
+        "fn": fn_total,
+        "tn": tn_total,
+        "top10_accuracy": accuracy,
+    }
+
+
+def _top10_confusion_by_race(pred_df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    per_race = pred_df.groupby(["season", "round"], dropna=True)
+    for (season, rnd), group in per_race:
+        if group.empty:
+            continue
+        true_top10 = set(group.nsmallest(10, "race_position").index)
+        pred_top10 = set(group.nsmallest(10, "predicted_position").index)
+        tp = fp = fn = tn = 0
+        for idx in group.index:
+            is_true = idx in true_top10
+            is_pred = idx in pred_top10
+            if is_true and is_pred:
+                tp += 1
+            elif is_pred and not is_true:
+                fp += 1
+            elif is_true and not is_pred:
+                fn += 1
+            else:
+                tn += 1
+        total = tp + fp + fn + tn
+        accuracy = (tp + tn) / total if total else float("nan")
+        grand_prix_name = None
+        if "grand_prix_name" in group.columns:
+            grand_prix_name = group["grand_prix_name"].iloc[0]
+        elif "track" in group.columns:
+            grand_prix_name = group["track"].iloc[0]
+
+        rows.append(
+            {
+                "season": season,
+                "round": rnd,
+                "grand_prix_name": grand_prix_name,
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "tn": tn,
+                "top10_accuracy": accuracy,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _plot_confusion_matrix(confusion: dict, output_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    matrix = np.array(
+        [[confusion["tp"], confusion["fp"]], [confusion["fn"], confusion["tn"]]]
+    )
+    plt.figure(figsize=(4, 4))
+    plt.imshow(matrix, cmap="Blues")
+    plt.title("Top-10 Confusion Matrix (Aggregated)")
+    plt.xticks([0, 1], ["Pred Top10", "Pred Not"])
+    plt.yticks([0, 1], ["Actual Top10", "Actual Not"])
+
+    for i in range(2):
+        for j in range(2):
+            plt.text(j, i, str(matrix[i, j]), ha="center", va="center", color="black")
+
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+
 def _spearman_corr(pred_df: pd.DataFrame) -> float:
     return pred_df["race_position"].corr(
         pred_df["predicted_position"], method="spearman"
@@ -104,7 +201,9 @@ def _predict_with_ranking(
     return out
 
 
-def _write_report(report_path: Path, metrics: dict, feature_count: int) -> None:
+def _write_report(
+    report_path: Path, metrics: dict, feature_count: int, confusion: dict | None
+) -> None:
     with report_path.open("w") as f:
         f.write("Phase 5 - First ML Model Report\n")
         f.write("================================\n\n")
@@ -117,6 +216,13 @@ def _write_report(report_path: Path, metrics: dict, feature_count: int) -> None:
         f.write(f"- Spearman: {metrics['spearman']:.3f}\n")
         f.write(f"- Top-10 Precision: {metrics['top10_precision']:.3f}\n")
         f.write(f"- Top-10 Recall: {metrics['top10_recall']:.3f}\n")
+        if confusion:
+            f.write(f"- Top-10 Accuracy: {confusion['top10_accuracy']:.3f}\n")
+            f.write("\nTop-10 Confusion Matrix (Aggregated):\n")
+            f.write(f"TP: {confusion['tp']}\n")
+            f.write(f"FP: {confusion['fp']}\n")
+            f.write(f"FN: {confusion['fn']}\n")
+            f.write(f"TN: {confusion['tn']}\n")
 
 
 def main() -> None:
@@ -140,6 +246,26 @@ def main() -> None:
         "--model-path",
         default=str(MODEL_DIR / "phase5_xgboost.json"),
         help="Path to save trained model",
+    )
+    parser.add_argument(
+        "--top10-classification",
+        action="store_true",
+        help="Write top-10 classification output and confusion matrix.",
+    )
+    parser.add_argument(
+        "--top10-output",
+        default=str(MODEL_DIR / "phase5_top10_classification_2025.csv"),
+        help="Path to save top-10 classification output.",
+    )
+    parser.add_argument(
+        "--top10-confusion-by-race",
+        default=str(MODEL_DIR / "phase5_top10_confusion_by_race_2025.csv"),
+        help="Path to save per-race confusion matrix output.",
+    )
+    parser.add_argument(
+        "--top10-confusion-plot",
+        default=str(MODEL_DIR / "phase5_top10_confusion_matrix.png"),
+        help="Path to save confusion matrix visualization.",
     )
     args = parser.parse_args()
 
@@ -188,6 +314,7 @@ def main() -> None:
         "spearman": _spearman_corr(ranked),
     }
     metrics.update(_top10_metrics(ranked))
+    confusion = _top10_confusion(ranked) if args.top10_classification else None
 
     # Save predictions
     ranked = ranked.rename(columns={"track": "grand_prix_name"})
@@ -203,11 +330,31 @@ def main() -> None:
     ]
     ranked[output_cols].to_csv(args.predictions, index=False)
 
+    if args.top10_classification:
+        class_out = ranked[
+            [
+                "driver_name",
+                "team",
+                "season",
+                "round",
+                "race_position",
+                "predicted_rank",
+            ]
+        ].copy()
+        class_out = class_out.rename(columns={"predicted_rank": "predicted_top10_rank"})
+        class_out["is_top10_true"] = class_out["race_position"] <= 10
+        class_out["is_top10_pred"] = class_out["predicted_top10_rank"] <= 10
+        class_out.to_csv(args.top10_output, index=False)
+        per_race = _top10_confusion_by_race(ranked)
+        per_race.to_csv(args.top10_confusion_by_race, index=False)
+        if confusion:
+            _plot_confusion_matrix(confusion, Path(args.top10_confusion_plot))
+
     # Save model
     model.save_model(args.model_path)
 
     # Write report
-    _write_report(Path(args.report), metrics, len(feature_cols))
+    _write_report(Path(args.report), metrics, len(feature_cols), confusion)
 
     print(f"Saved model -> {args.model_path}")
     print(f"Saved predictions -> {args.predictions}")
