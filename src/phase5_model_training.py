@@ -26,18 +26,29 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop rows without target or key weekend signal.
     feature_df = feature_df.dropna(subset=[TARGET_COL, "qualifying_position"])
+    # Drop non-feature columns that can leak or are non-numeric.
+    if "status" in feature_df.columns:
+        feature_df = feature_df.drop(columns=["status"])
 
     # Fill numeric NaNs with median (simple baseline strategy).
     numeric_cols = feature_df.select_dtypes(include=["number"]).columns
     for col in numeric_cols:
         if col == TARGET_COL:
             continue
-        feature_df[col] = feature_df[col].fillna(feature_df[col].median())
+        median_value = feature_df[col].median()
+        if pd.isna(median_value):
+            median_value = 0.0
+        feature_df[col] = feature_df[col].fillna(median_value)
 
     # One-hot encode categorical features.
     categorical_cols = ["driver_name", "team", "track_type", "track"]
     categorical_cols = [col for col in categorical_cols if col in feature_df.columns]
     feature_df = pd.get_dummies(feature_df, columns=categorical_cols, dummy_na=True)
+
+    # Ensure no object columns remain (XGBoost requires numeric/bool).
+    object_cols = feature_df.select_dtypes(include=["object"]).columns
+    if len(object_cols) > 0:
+        feature_df = feature_df.drop(columns=list(object_cols))
 
     return feature_df
 
@@ -81,7 +92,7 @@ def _predict_with_ranking(
     X_test: pd.DataFrame,
 ) -> pd.DataFrame:
     preds = model.predict(X_test)
-    out = test_raw.copy()
+    out = test_raw.loc[X_test.index].copy()
     out["predicted_position"] = preds
 
     # Rank within each race
