@@ -170,7 +170,7 @@ Sprint weekend columns:
 Script: `src/phase5_model_training.py`
 
 What it does:
-- Trains XGBoost on 2023–2024 and tests on 2025
+- Trains XGBoost, Random Forest, and Linear Regression on 2023–2024 and tests on 2025
 - Predicts race positions and ranks drivers per race
 - Optional Top-10 classification output, confusion matrix, and visualization
 
@@ -186,12 +186,28 @@ python src/phase5_model_training.py --top10-classification
 
 Outputs:
 ```
-models/phase5_xgboost.json
-models/phase5_predictions_2025.csv
-models/phase5_report.txt
-models/phase5_top10_classification_2025.csv (optional)
-models/phase5_top10_confusion_by_race_2025.csv (optional)
-models/phase5_top10_confusion_matrix.png (optional)
+models/xgboost/model.json
+models/xgboost/predictions_2025.csv
+models/xgboost/report.txt
+models/xgboost/top10_classification_2025.csv (optional)
+models/xgboost/top10_confusion_by_race_2025.csv (optional)
+models/xgboost/top10_confusion_matrix.png (optional)
+
+models/random_forest/model.pkl
+models/random_forest/model.json
+models/random_forest/predictions_2025.csv
+models/random_forest/report.txt
+models/random_forest/top10_classification_2025.csv (optional)
+models/random_forest/top10_confusion_by_race_2025.csv (optional)
+models/random_forest/top10_confusion_matrix.png (optional)
+
+models/linear_regression/model.pkl
+models/linear_regression/model.json
+models/linear_regression/predictions_2025.csv
+models/linear_regression/report.txt
+models/linear_regression/top10_classification_2025.csv (optional)
+models/linear_regression/top10_confusion_by_race_2025.csv (optional)
+models/linear_regression/top10_confusion_matrix.png (optional)
 ```
 
 Prediction columns (2025):

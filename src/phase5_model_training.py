@@ -1,8 +1,13 @@
 import argparse
+import json
+import pickle
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 from xgboost import XGBRegressor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -184,7 +189,7 @@ def _spearman_corr(pred_df: pd.DataFrame) -> float:
 
 
 def _predict_with_ranking(
-    model: XGBRegressor,
+    model,
     test_raw: pd.DataFrame,
     X_test: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -202,12 +207,16 @@ def _predict_with_ranking(
 
 
 def _write_report(
-    report_path: Path, metrics: dict, feature_count: int, confusion: dict | None
+    report_path: Path,
+    model_name: str,
+    metrics: dict,
+    feature_count: int,
+    confusion: dict | None,
 ) -> None:
     with report_path.open("w") as f:
         f.write("Phase 5 - First ML Model Report\n")
         f.write("================================\n\n")
-        f.write("Model: XGBoost Regressor (predict race_position)\n")
+        f.write(f"Model: {model_name}\n")
         f.write("Train seasons: 2023, 2024\n")
         f.write("Test season: 2025\n\n")
         f.write(f"Features used: {feature_count}\n\n")
@@ -225,6 +234,104 @@ def _write_report(
             f.write(f"TN: {confusion['tn']}\n")
 
 
+def _save_sklearn_model(model, path: Path) -> None:
+    with path.open("wb") as f:
+        pickle.dump(model, f)
+
+
+def _save_sklearn_model_json(model, feature_cols: List[str], path: Path) -> None:
+    payload = {"model": model.__class__.__name__}
+    if hasattr(model, "coef_"):
+        payload["coefficients"] = dict(zip(feature_cols, model.coef_.tolist()))
+        payload["intercept"] = float(model.intercept_)
+    if hasattr(model, "feature_importances_"):
+        payload["feature_importances"] = dict(
+            zip(feature_cols, model.feature_importances_.tolist())
+        )
+    with path.open("w") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _train_and_evaluate(
+    model_name: str,
+    model,
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    test_raw: pd.DataFrame,
+    feature_cols: List[str],
+    args: argparse.Namespace,
+) -> None:
+    model_dir = MODEL_DIR / model_name
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    X_train = train[feature_cols]
+    y_train = train[TARGET_COL]
+    X_test = test[feature_cols]
+    y_test = test[TARGET_COL]
+
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    mae = float(np.mean(np.abs(preds - y_test)))
+
+    ranked = _predict_with_ranking(model, test_raw, X_test)
+    ranked = ranked.rename(columns={"track": "grand_prix_name"})
+
+    metrics = {
+        "mae": mae,
+        "spearman": _spearman_corr(ranked),
+    }
+    metrics.update(_top10_metrics(ranked))
+    confusion = _top10_confusion(ranked) if args.top10_classification else None
+
+    predictions_path = model_dir / "predictions_2025.csv"
+    output_cols = [
+        "driver_name",
+        "team",
+        "season",
+        "round",
+        "grand_prix_name",
+        "race_position",
+        "predicted_position",
+        "predicted_rank",
+    ]
+    ranked[output_cols].to_csv(predictions_path, index=False)
+
+    if isinstance(model, XGBRegressor):
+        model_path = model_dir / "model.json"
+        model.save_model(model_path)
+    else:
+        model_path = model_dir / "model.pkl"
+        _save_sklearn_model(model, model_path)
+        _save_sklearn_model_json(model, feature_cols, model_dir / "model.json")
+
+    report_path = model_dir / "report.txt"
+    _write_report(report_path, model_name, metrics, len(feature_cols), confusion)
+
+    if args.top10_classification:
+        class_out = ranked[
+            [
+                "driver_name",
+                "team",
+                "season",
+                "round",
+                "race_position",
+                "predicted_rank",
+            ]
+        ].copy()
+        class_out = class_out.rename(columns={"predicted_rank": "predicted_top10_rank"})
+        class_out["is_top10_true"] = class_out["race_position"] <= 10
+        class_out["is_top10_pred"] = class_out["predicted_top10_rank"] <= 10
+        class_out.to_csv(model_dir / "top10_classification_2025.csv", index=False)
+        per_race = _top10_confusion_by_race(ranked)
+        per_race.to_csv(model_dir / "top10_confusion_by_race_2025.csv", index=False)
+        if confusion:
+            _plot_confusion_matrix(confusion, model_dir / "top10_confusion_matrix.png")
+
+    print(f"[{model_name}] Saved model -> {model_path}")
+    print(f"[{model_name}] Saved predictions -> {predictions_path}")
+    print(f"[{model_name}] Saved report -> {report_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 5: Train first ML model")
     parser.add_argument(
@@ -233,39 +340,9 @@ def main() -> None:
         help="Path to feature dataset",
     )
     parser.add_argument(
-        "--report",
-        default=str(MODEL_DIR / "phase5_report.txt"),
-        help="Path to save model report",
-    )
-    parser.add_argument(
-        "--predictions",
-        default=str(MODEL_DIR / "phase5_predictions_2025.csv"),
-        help="Path to save 2025 predictions",
-    )
-    parser.add_argument(
-        "--model-path",
-        default=str(MODEL_DIR / "phase5_xgboost.json"),
-        help="Path to save trained model",
-    )
-    parser.add_argument(
         "--top10-classification",
         action="store_true",
         help="Write top-10 classification output and confusion matrix.",
-    )
-    parser.add_argument(
-        "--top10-output",
-        default=str(MODEL_DIR / "phase5_top10_classification_2025.csv"),
-        help="Path to save top-10 classification output.",
-    )
-    parser.add_argument(
-        "--top10-confusion-by-race",
-        default=str(MODEL_DIR / "phase5_top10_confusion_by_race_2025.csv"),
-        help="Path to save per-race confusion matrix output.",
-    )
-    parser.add_argument(
-        "--top10-confusion-plot",
-        default=str(MODEL_DIR / "phase5_top10_confusion_matrix.png"),
-        help="Path to save confusion matrix visualization.",
     )
     args = parser.parse_args()
 
@@ -288,12 +365,7 @@ def main() -> None:
         col for col in train.columns if col not in IDENTIFIER_COLS and col != TARGET_COL
     ]
 
-    X_train = train[feature_cols]
-    y_train = train[TARGET_COL]
-    X_test = test[feature_cols]
-    y_test = test[TARGET_COL]
-
-    model = XGBRegressor(
+    xgb = XGBRegressor(
         n_estimators=500,
         learning_rate=0.05,
         max_depth=6,
@@ -302,63 +374,19 @@ def main() -> None:
         objective="reg:squarederror",
         random_state=42,
     )
-    model.fit(X_train, y_train)
+    rf = RandomForestRegressor(
+        n_estimators=300,
+        max_depth=None,
+        random_state=42,
+        n_jobs=-1,
+    )
+    lr = LinearRegression()
 
-    preds = model.predict(X_test)
-    mae = float(np.mean(np.abs(preds - y_test)))
-
-    ranked = _predict_with_ranking(model, test_raw, X_test)
-
-    metrics = {
-        "mae": mae,
-        "spearman": _spearman_corr(ranked),
-    }
-    metrics.update(_top10_metrics(ranked))
-    confusion = _top10_confusion(ranked) if args.top10_classification else None
-
-    # Save predictions
-    ranked = ranked.rename(columns={"track": "grand_prix_name"})
-    output_cols = [
-        "driver_name",
-        "team",
-        "season",
-        "round",
-        "grand_prix_name",
-        "race_position",
-        "predicted_position",
-        "predicted_rank",
-    ]
-    ranked[output_cols].to_csv(args.predictions, index=False)
-
-    if args.top10_classification:
-        class_out = ranked[
-            [
-                "driver_name",
-                "team",
-                "season",
-                "round",
-                "race_position",
-                "predicted_rank",
-            ]
-        ].copy()
-        class_out = class_out.rename(columns={"predicted_rank": "predicted_top10_rank"})
-        class_out["is_top10_true"] = class_out["race_position"] <= 10
-        class_out["is_top10_pred"] = class_out["predicted_top10_rank"] <= 10
-        class_out.to_csv(args.top10_output, index=False)
-        per_race = _top10_confusion_by_race(ranked)
-        per_race.to_csv(args.top10_confusion_by_race, index=False)
-        if confusion:
-            _plot_confusion_matrix(confusion, Path(args.top10_confusion_plot))
-
-    # Save model
-    model.save_model(args.model_path)
-
-    # Write report
-    _write_report(Path(args.report), metrics, len(feature_cols), confusion)
-
-    print(f"Saved model -> {args.model_path}")
-    print(f"Saved predictions -> {args.predictions}")
-    print(f"Saved report -> {args.report}")
+    _train_and_evaluate("xgboost", xgb, train, test, test_raw, feature_cols, args)
+    _train_and_evaluate("random_forest", rf, train, test, test_raw, feature_cols, args)
+    _train_and_evaluate(
+        "linear_regression", lr, train, test, test_raw, feature_cols, args
+    )
 
 
 if __name__ == "__main__":
