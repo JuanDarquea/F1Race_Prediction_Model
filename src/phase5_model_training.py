@@ -212,6 +212,7 @@ def _write_report(
     metrics: dict,
     feature_count: int,
     confusion: dict | None,
+    hyperparams: dict,
 ) -> None:
     with report_path.open("w") as f:
         f.write("Phase 5 - First ML Model Report\n")
@@ -220,6 +221,10 @@ def _write_report(
         f.write("Train seasons: 2023, 2024\n")
         f.write("Test season: 2025\n\n")
         f.write(f"Features used: {feature_count}\n\n")
+        f.write("Hyperparameters:\n")
+        for key, value in sorted(hyperparams.items()):
+            f.write(f"- {key}: {value}\n")
+        f.write("\n")
         f.write("Evaluation Metrics (2025):\n")
         f.write(f"- MAE: {metrics['mae']:.3f}\n")
         f.write(f"- Spearman: {metrics['spearman']:.3f}\n")
@@ -305,7 +310,10 @@ def _train_and_evaluate(
         _save_sklearn_model_json(model, feature_cols, model_dir / "model.json")
 
     report_path = model_dir / "report.txt"
-    _write_report(report_path, model_name, metrics, len(feature_cols), confusion)
+    hyperparams = model.get_params() if hasattr(model, "get_params") else {}
+    _write_report(
+        report_path, model_name, metrics, len(feature_cols), confusion, hyperparams
+    )
 
     if args.top10_classification:
         class_out = ranked[
@@ -366,17 +374,19 @@ def main() -> None:
     ]
 
     xgb = XGBRegressor(
-        n_estimators=500,
+        n_estimators=700,
         learning_rate=0.05,
-        max_depth=6,
+        max_depth=7,
         subsample=0.8,
         colsample_bytree=0.8,
         objective="reg:squarederror",
         random_state=42,
     )
     rf = RandomForestRegressor(
-        n_estimators=300,
+        n_estimators=500,
         max_depth=None,
+        max_features="sqrt",
+        min_samples_leaf=2,
         random_state=42,
         n_jobs=-1,
     )
