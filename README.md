@@ -48,6 +48,22 @@ This project is a living document of my growth in AI and Data Science. As I refi
 
 ## Project Phases (Current Setup)
 
+## Quickstart
+Run the full pipeline from raw data to model training:
+
+```bash
+python src/phase1_data_collection.py --years 2023 2024 2025 --sessions FP1 FP2 FP3 SQ S Q R
+python src/phase2_data_cleaning.py --sessions R S --split-by-year --aggregate-by-driver --aggregate-by-circuit
+python src/phase3_eda.py
+python src/phase4_feature_engineering.py --track-type-path data/track_types.csv
+python src/phase5_model_training.py --top10-classification
+```
+
+Interactive weekend prediction:
+```bash
+python src/phase5_predict_weekend.py
+```
+
 ### Phase 1 - Data Collection
 Script: `src/phase1_data_collection.py`
 
@@ -171,7 +187,8 @@ Script: `src/phase5_model_training.py`
 
 What it does:
 - Trains XGBoost, Random Forest, and Linear Regression on 2023–2024 and tests on 2025
-- Predicts race positions and ranks drivers per race
+- Produces models for race, sprint, and qualifying targets
+- Predicts positions and ranks drivers per race
 - Optional Top-10 classification output, confusion matrix, and visualization
 
 Example (basic training):
@@ -184,11 +201,22 @@ Example (Top-10 classification + confusion outputs):
 python src/phase5_model_training.py --top10-classification
 ```
 
+Interactive single-weekend predictions:
+```bash
+python src/phase5_predict_weekend.py
+```
+
 Outputs:
 ```
 models/xgboost/model.json
 models/xgboost/predictions_2025.csv
 models/xgboost/report.txt
+models/xgboost/model_sprint.json
+models/xgboost/predictions_2025_sprint.csv
+models/xgboost/report_sprint.txt
+models/xgboost/model_qualifying.json
+models/xgboost/predictions_2025_qualifying.csv
+models/xgboost/report_qualifying.txt
 models/xgboost/top10_classification_2025.csv (optional)
 models/xgboost/top10_confusion_by_race_2025.csv (optional)
 models/xgboost/top10_confusion_matrix.png (optional)
@@ -197,6 +225,14 @@ models/random_forest/model.pkl
 models/random_forest/model.json
 models/random_forest/predictions_2025.csv
 models/random_forest/report.txt
+models/random_forest/model_sprint.pkl
+models/random_forest/model_sprint.json
+models/random_forest/predictions_2025_sprint.csv
+models/random_forest/report_sprint.txt
+models/random_forest/model_qualifying.pkl
+models/random_forest/model_qualifying.json
+models/random_forest/predictions_2025_qualifying.csv
+models/random_forest/report_qualifying.txt
 models/random_forest/top10_classification_2025.csv (optional)
 models/random_forest/top10_confusion_by_race_2025.csv (optional)
 models/random_forest/top10_confusion_matrix.png (optional)
@@ -205,9 +241,21 @@ models/linear_regression/model.pkl
 models/linear_regression/model.json
 models/linear_regression/predictions_2025.csv
 models/linear_regression/report.txt
+models/linear_regression/model_sprint.pkl
+models/linear_regression/model_sprint.json
+models/linear_regression/predictions_2025_sprint.csv
+models/linear_regression/report_sprint.txt
+models/linear_regression/model_qualifying.pkl
+models/linear_regression/model_qualifying.json
+models/linear_regression/predictions_2025_qualifying.csv
+models/linear_regression/report_qualifying.txt
 models/linear_regression/top10_classification_2025.csv (optional)
 models/linear_regression/top10_confusion_by_race_2025.csv (optional)
 models/linear_regression/top10_confusion_matrix.png (optional)
+
+models/*/predict_2025_roundXX_race.csv (interactive)
+models/*/predict_2025_roundXX_sprint.csv (interactive)
+models/*/predict_2025_roundXX_qualifying.csv (interactive)
 ```
 
 Prediction columns (2025):

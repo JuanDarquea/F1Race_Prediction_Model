@@ -1,8 +1,9 @@
 import argparse
 import json
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -26,14 +27,64 @@ IDENTIFIER_COLS = [
 TARGET_COL = "race_position"
 
 
-def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+@dataclass(frozen=True)
+class TargetConfig:
+    target_col: str
+    required_cols: List[str]
+    drop_cols: List[str]
+    output_suffix: str
+    label: str
+
+
+TARGET_CONFIGS: Dict[str, TargetConfig] = {
+    "race": TargetConfig(
+        target_col="race_position",
+        required_cols=["qualifying_position"],
+        drop_cols=["race_points"],
+        output_suffix="",
+        label="race",
+    ),
+    "sprint": TargetConfig(
+        target_col="sprint_position",
+        required_cols=["sprint_qualifying_position"],
+        drop_cols=["sprint_points", "race_position", "race_points"],
+        output_suffix="_sprint",
+        label="sprint",
+    ),
+    "qualifying": TargetConfig(
+        target_col="qualifying_position",
+        required_cols=["practice_pace"],
+        drop_cols=[
+            "race_position",
+            "race_points",
+            "sprint_position",
+            "sprint_points",
+            "sprint_qualifying_position",
+        ],
+        output_suffix="_qualifying",
+        label="qualifying",
+    ),
+}
+
+
+def _prepare_features(
+    df: pd.DataFrame,
+    target_col: str,
+    required_cols: List[str],
+    drop_cols: List[str],
+) -> pd.DataFrame:
     feature_df = df.copy()
 
     # Drop rows without target or key weekend signal.
-    feature_df = feature_df.dropna(subset=[TARGET_COL, "qualifying_position"])
+    feature_df = feature_df.dropna(subset=[target_col])
+    if required_cols:
+        feature_df = feature_df.dropna(subset=required_cols)
     # Drop non-feature columns that can leak or are non-numeric.
     if "status" in feature_df.columns:
         feature_df = feature_df.drop(columns=["status"])
+    for col in drop_cols:
+        if col in feature_df.columns:
+            feature_df = feature_df.drop(columns=[col])
 
     # Fill numeric NaNs with median (simple baseline strategy).
     numeric_cols = feature_df.select_dtypes(include=["number"]).columns
@@ -49,6 +100,7 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     categorical_cols = ["driver_name", "team", "track_type", "track"]
     categorical_cols = [col for col in categorical_cols if col in feature_df.columns]
     feature_df = pd.get_dummies(feature_df, columns=categorical_cols, dummy_na=True)
+    feature_df.columns = feature_df.columns.infer_objects(copy=False)
 
     # Ensure no object columns remain (XGBoost requires numeric/bool).
     object_cols = feature_df.select_dtypes(include=["object"]).columns
@@ -162,6 +214,9 @@ def _top10_confusion_by_race(pred_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _plot_confusion_matrix(confusion: dict, output_path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     matrix = np.array(
@@ -264,15 +319,17 @@ def _train_and_evaluate(
     test: pd.DataFrame,
     test_raw: pd.DataFrame,
     feature_cols: List[str],
+    target_col: str,
+    output_suffix: str,
     args: argparse.Namespace,
 ) -> None:
     model_dir = MODEL_DIR / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
 
     X_train = train[feature_cols]
-    y_train = train[TARGET_COL]
+    y_train = train[target_col]
     X_test = test[feature_cols]
-    y_test = test[TARGET_COL]
+    y_test = test[target_col]
 
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
@@ -280,36 +337,40 @@ def _train_and_evaluate(
 
     ranked = _predict_with_ranking(model, test_raw, X_test)
     ranked = ranked.rename(columns={"track": "grand_prix_name"})
+    ranked_metrics = ranked.copy()
+    ranked_metrics["race_position"] = ranked_metrics[target_col]
 
     metrics = {
         "mae": mae,
-        "spearman": _spearman_corr(ranked),
+        "spearman": _spearman_corr(ranked_metrics),
     }
-    metrics.update(_top10_metrics(ranked))
-    confusion = _top10_confusion(ranked) if args.top10_classification else None
+    metrics.update(_top10_metrics(ranked_metrics))
+    confusion = _top10_confusion(ranked_metrics) if args.top10_classification else None
 
-    predictions_path = model_dir / "predictions_2025.csv"
+    predictions_path = model_dir / f"predictions_2025{output_suffix}.csv"
     output_cols = [
         "driver_name",
         "team",
         "season",
         "round",
         "grand_prix_name",
-        "race_position",
+        target_col,
         "predicted_position",
         "predicted_rank",
     ]
     ranked[output_cols].to_csv(predictions_path, index=False)
 
     if isinstance(model, XGBRegressor):
-        model_path = model_dir / "model.json"
+        model_path = model_dir / f"model{output_suffix}.json"
         model.save_model(model_path)
     else:
-        model_path = model_dir / "model.pkl"
+        model_path = model_dir / f"model{output_suffix}.pkl"
         _save_sklearn_model(model, model_path)
-        _save_sklearn_model_json(model, feature_cols, model_dir / "model.json")
+        _save_sklearn_model_json(
+            model, feature_cols, model_dir / f"model{output_suffix}.json"
+        )
 
-    report_path = model_dir / "report.txt"
+    report_path = model_dir / f"report{output_suffix}.txt"
     hyperparams = model.get_params() if hasattr(model, "get_params") else {}
     _write_report(
         report_path, model_name, metrics, len(feature_cols), confusion, hyperparams
@@ -317,23 +378,23 @@ def _train_and_evaluate(
 
     if args.top10_classification:
         class_out = ranked[
-            [
-                "driver_name",
-                "team",
-                "season",
-                "round",
-                "race_position",
-                "predicted_rank",
-            ]
+            ["driver_name", "team", "season", "round", target_col, "predicted_rank"]
         ].copy()
         class_out = class_out.rename(columns={"predicted_rank": "predicted_top10_rank"})
-        class_out["is_top10_true"] = class_out["race_position"] <= 10
+        class_out["is_top10_true"] = class_out[target_col] <= 10
         class_out["is_top10_pred"] = class_out["predicted_top10_rank"] <= 10
-        class_out.to_csv(model_dir / "top10_classification_2025.csv", index=False)
-        per_race = _top10_confusion_by_race(ranked)
-        per_race.to_csv(model_dir / "top10_confusion_by_race_2025.csv", index=False)
+        class_out.to_csv(
+            model_dir / f"top10_classification_2025{output_suffix}.csv", index=False
+        )
+        per_race = _top10_confusion_by_race(ranked_metrics)
+        per_race.to_csv(
+            model_dir / f"top10_confusion_by_race_2025{output_suffix}.csv",
+            index=False,
+        )
         if confusion:
-            _plot_confusion_matrix(confusion, model_dir / "top10_confusion_matrix.png")
+            _plot_confusion_matrix(
+                confusion, model_dir / f"top10_confusion_matrix{output_suffix}.png"
+            )
 
     print(f"[{model_name}] Saved model -> {model_path}")
     print(f"[{model_name}] Saved predictions -> {predictions_path}")
@@ -362,17 +423,6 @@ def main() -> None:
     if train_raw.empty or test_raw.empty:
         raise ValueError("Training or testing split is empty. Check your seasons.")
 
-    train = _prepare_features(train_raw)
-    test = _prepare_features(test_raw)
-
-    # Align columns between train and test
-    train, test = train.align(test, join="left", axis=1, fill_value=0)
-
-    # Remove identifiers from feature set
-    feature_cols = [
-        col for col in train.columns if col not in IDENTIFIER_COLS and col != TARGET_COL
-    ]
-
     xgb = XGBRegressor(
         n_estimators=700,
         learning_rate=0.05,
@@ -392,11 +442,61 @@ def main() -> None:
     )
     lr = LinearRegression()
 
-    _train_and_evaluate("xgboost", xgb, train, test, test_raw, feature_cols, args)
-    _train_and_evaluate("random_forest", rf, train, test, test_raw, feature_cols, args)
-    _train_and_evaluate(
-        "linear_regression", lr, train, test, test_raw, feature_cols, args
-    )
+    for target_key, cfg in TARGET_CONFIGS.items():
+        train = _prepare_features(
+            train_raw, cfg.target_col, cfg.required_cols, cfg.drop_cols
+        )
+        test = _prepare_features(
+            test_raw, cfg.target_col, cfg.required_cols, cfg.drop_cols
+        )
+
+        if train.empty or test.empty:
+            print(f"[skip] {target_key}: not enough data after filtering")
+            continue
+
+        # Align columns between train and test
+        train, test = train.align(test, join="left", axis=1, fill_value=0)
+
+        # Remove identifiers and target from feature set
+        feature_cols = [
+            col
+            for col in train.columns
+            if col not in IDENTIFIER_COLS and col != cfg.target_col
+        ]
+
+        _train_and_evaluate(
+            "xgboost",
+            xgb,
+            train,
+            test,
+            test_raw,
+            feature_cols,
+            cfg.target_col,
+            cfg.output_suffix,
+            args,
+        )
+        _train_and_evaluate(
+            "random_forest",
+            rf,
+            train,
+            test,
+            test_raw,
+            feature_cols,
+            cfg.target_col,
+            cfg.output_suffix,
+            args,
+        )
+        _train_and_evaluate(
+            "linear_regression",
+            lr,
+            train,
+            test,
+            test_raw,
+            feature_cols,
+            cfg.target_col,
+            cfg.output_suffix,
+            args,
+        )
 
 
 if __name__ == "__main__":
