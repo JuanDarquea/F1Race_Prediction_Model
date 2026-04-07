@@ -130,7 +130,7 @@ def main() -> None:
     ]
     race_choice = _prompt_choice("Select 2025 race weekend:", race_options)
     selected_idx = race_options.index(race_choice)
-    selected_round = int(races.loc[selected_idx, "round"])
+    selected_round = int(float(races.loc[selected_idx, "round"]))
     selected_track = races.loc[selected_idx, "track"]
 
     scope = _prompt_choice(
@@ -156,7 +156,7 @@ def main() -> None:
             out = _predict_target(
                 model_name, target, train_raw, test_raw, selected_round, selected_track
             )
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, ValueError) as exc:
             print(f"[{target}] {exc}")
             print("Run phase5_model_training.py to generate missing models.\n")
             continue
