@@ -53,7 +53,7 @@ TARGET_CONFIGS: Dict[str, TargetConfig] = {
     ),
     "qualifying": TargetConfig(
         target_col="qualifying_position",
-        required_cols=["practice_pace"],
+        required_cols=[],
         drop_cols=[
             "race_position",
             "race_points",

@@ -206,6 +206,25 @@ Interactive single-weekend predictions:
 python src/phase5_predict_weekend.py
 ```
 
+### Phase 6 - 2026 Race Week Prediction
+Script: `src/phase6_predict_2026.py`
+
+What it does:
+- Refreshes raw data for a selected 2026 race weekend
+- Rebuilds features and runs ensemble predictions (XGBoost + RF + Linear)
+- Outputs Top-10 with Pole % and predicted finish position
+
+Example:
+```bash
+python src/phase6_predict_2026.py --round 5
+```
+
+Output:
+```
+models/ensemble/predict_2026_round05.csv
+models/ensemble/report_2026_round05.txt
+```
+
 Outputs:
 ```
 models/xgboost/model.json

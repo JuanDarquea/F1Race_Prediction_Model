@@ -42,12 +42,16 @@ def _normalize_laps(laps: pd.DataFrame, session_meta: dict) -> pd.DataFrame:
 
 def _session_meta(session) -> dict:
     event = session.event
+    try:
+        session_type = str(session.session_info)
+    except f1_exceptions.DataNotLoadedError:
+        session_type = str(session.name)
     return {
         "Season": int(event["EventDate"].year),
         "RoundNumber": int(event["RoundNumber"]),
         "EventName": str(event["EventName"]),
         "SessionName": str(session.name),
-        "SessionType": str(session.session_info),
+        "SessionType": session_type,
         "EventDate": str(event["EventDate"]),
     }
 
@@ -88,6 +92,8 @@ def _save_drivers(session, out_dir: Path) -> Optional[Path]:
     except f1_exceptions.DataNotLoadedError:
         results = None
 
+    drivers_df = None
+
     if results is not None and not results.empty:
         drivers_df = session.results[
             [
@@ -112,7 +118,10 @@ def _save_drivers(session, out_dir: Path) -> Optional[Path]:
         if not columns:
             return None
         drivers_df = session.laps[columns].drop_duplicates()
-    elif results is None:
+    elif results is None and drivers_df is None:
+        return None
+
+    if drivers_df is None:
         return None
 
     meta = _session_meta(session)
@@ -170,9 +179,16 @@ def collect_for_seasons(
                 )
                 _safe_mkdir(out_dir)
 
-                laps_path = _save_laps(session, out_dir)
-                results_path = _save_results(session, out_dir)
-                drivers_path = _save_drivers(session, out_dir)
+                try:
+                    laps_path = _save_laps(session, out_dir)
+                    results_path = _save_results(session, out_dir)
+                    drivers_path = _save_drivers(session, out_dir)
+                except f1_exceptions.DataNotLoadedError as exc:
+                    print(
+                        f"[skip] {year} {event_name} ({round_number}) {session_code}: "
+                        f"data not loaded yet ({exc}). This often happens for current-year sessions."
+                    )
+                    continue
 
                 print(
                     f"[ok] {year} {event_name} ({round_number}) {session_code} -> "
