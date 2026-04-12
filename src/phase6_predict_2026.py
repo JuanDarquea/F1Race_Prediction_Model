@@ -184,15 +184,16 @@ def _pole_probability(
 
     X = _align_to_columns(features, feature_cols)
 
-    pole_counts = np.zeros(len(X), dtype=float)
+    preds_per_model = []
     for model_name in models:
         model = _load_model(model_name, cfg.output_suffix)
         preds = np.nan_to_num(model.predict(X))
-        ranks = pd.Series(preds).rank(method="first").to_numpy()
-        pole_counts += (ranks == 1).astype(float)
+        preds_per_model.append(preds)
 
-    pole_pct = pole_counts / len(models)
-    return pd.Series(pole_pct, index=features.index)
+    avg_pred = np.mean(np.vstack(preds_per_model), axis=0)
+    scores = np.exp(-avg_pred)
+    pole_prob = scores / scores.sum()
+    return pd.Series(pole_prob, index=features.index)
 
 
 def main() -> None:
