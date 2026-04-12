@@ -294,6 +294,19 @@ def main() -> None:
         qual_feature_cols = _prepare_training_columns(full_features, "qualifying")
         pole_pct = _pole_probability(models, weekend_features, qual_feature_cols)
         race_preds["pole_pct"] = pole_pct.values * 100
+    except FileNotFoundError:
+        warnings.append(
+            "Qualifying models not found; run Phase 5 training to enable Pole %."
+        )
+        ranks = race_preds["predicted_rank"].to_numpy(dtype=float)
+        if np.isnan(ranks).any():
+            ranks = (
+                pd.Series(race_preds["avg_predicted_position"])
+                .rank(method="first")
+                .to_numpy()
+            )
+        scores = np.exp(-ranks)
+        race_preds["pole_pct"] = (scores / scores.sum()) * 100
     except Exception:
         warnings.append(
             "Pole % could not be computed from qualifying; using race-rank proxy."
