@@ -160,29 +160,63 @@ def _load_track_types(path: Path) -> pd.DataFrame:
 def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["season", "round"]).copy()
 
+    df["avg_finish_last_3"] = df.groupby("driver_name", dropna=True)[
+        "race_position"
+    ].transform(lambda s: s.rolling(3, min_periods=1).mean().shift(1))
     df["avg_finish_last_5"] = df.groupby("driver_name", dropna=True)[
         "race_position"
     ].transform(lambda s: s.rolling(5, min_periods=1).mean().shift(1))
+    df["std_finish_last_5"] = df.groupby("driver_name", dropna=True)[
+        "race_position"
+    ].transform(lambda s: s.rolling(5, min_periods=2).std().shift(1))
     df["avg_finish_last_10"] = df.groupby("driver_name", dropna=True)[
         "race_position"
     ].transform(lambda s: s.rolling(10, min_periods=1).mean().shift(1))
     df["avg_qualifying_position"] = df.groupby("driver_name", dropna=True)[
         "qualifying_position"
     ].transform(lambda s: s.expanding(min_periods=1).mean().shift(1))
+    df["avg_qualifying_last_5"] = df.groupby("driver_name", dropna=True)[
+        "qualifying_position"
+    ].transform(lambda s: s.rolling(5, min_periods=1).mean().shift(1))
     df["points_last_races"] = df.groupby("driver_name", dropna=True)[
         "race_points"
     ].transform(lambda s: s.rolling(5, min_periods=1).sum().shift(1))
+    df["avg_points_last_5"] = df.groupby("driver_name", dropna=True)[
+        "race_points"
+    ].transform(lambda s: s.rolling(5, min_periods=1).mean().shift(1))
 
     df["team_avg_finish"] = df.groupby("team", dropna=True)["race_position"].transform(
         lambda s: s.rolling(5, min_periods=1).mean().shift(1)
     )
+    df["team_avg_qualifying"] = df.groupby("team", dropna=True)[
+        "qualifying_position"
+    ].transform(lambda s: s.rolling(5, min_periods=1).mean().shift(1))
     df["constructor_points"] = df.groupby("team", dropna=True)["race_points"].transform(
         lambda s: s.rolling(5, min_periods=1).sum().shift(1)
     )
+    df["team_points_last_5"] = df.groupby("team", dropna=True)["race_points"].transform(
+        lambda s: s.rolling(5, min_periods=1).mean().shift(1)
+    )
+
+    race_minus_qual = df["race_position"] - df["qualifying_position"]
+    df["avg_race_minus_qual_last_10"] = race_minus_qual.groupby(
+        df["driver_name"], dropna=True
+    ).transform(lambda s: s.rolling(10, min_periods=2).mean().shift(1))
+
+    if "dnf_flag" in df.columns:
+        df["driver_dnf_rate_last_10"] = df.groupby("driver_name", dropna=True)[
+            "dnf_flag"
+        ].transform(lambda s: s.rolling(10, min_periods=2).mean().shift(1))
+        df["team_dnf_rate_last_10"] = df.groupby("team", dropna=True)[
+            "dnf_flag"
+        ].transform(lambda s: s.rolling(10, min_periods=2).mean().shift(1))
 
     df["driver_performance_at_track"] = df.groupby(
         ["driver_name", "track"], dropna=True
     )["race_position"].transform(lambda s: s.expanding(min_periods=1).mean().shift(1))
+    df["team_performance_at_track"] = df.groupby(["team", "track"], dropna=True)[
+        "race_position"
+    ].transform(lambda s: s.expanding(min_periods=1).mean().shift(1))
 
     return df
 
@@ -237,6 +271,21 @@ def build_feature_dataset(track_type_path: Path) -> pd.DataFrame:
         base = base.merge(track_types, on="track", how="left")
     else:
         base["track_type"] = "unknown"
+
+    if "status" in base.columns:
+        base["dnf_flag"] = base["status"].ne("Finished").astype("Int64")
+    else:
+        base["dnf_flag"] = pd.NA
+
+    base["practice_pace_rank"] = base.groupby(["season", "round"], dropna=True)[
+        "practice_pace"
+    ].rank(method="min")
+    base["practice_pace_percentile"] = base.groupby(["season", "round"], dropna=True)[
+        "practice_pace"
+    ].rank(pct=True)
+    base["practice_pace_gap_to_best"] = base["practice_pace"] - base.groupby(
+        ["season", "round"], dropna=True
+    )["practice_pace"].transform("min")
 
     base = _add_rolling_features(base)
 

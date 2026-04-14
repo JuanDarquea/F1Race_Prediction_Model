@@ -1,6 +1,8 @@
 import argparse
 import json
+import os
 import pickle
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
@@ -14,6 +16,19 @@ from xgboost import XGBRegressor
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEATURE_PATH = PROJECT_ROOT / "data" / "features" / "feature_dataset.csv"
 MODEL_DIR = PROJECT_ROOT / "models"
+MPLCONFIGDIR = Path("/tmp/matplotlib")
+MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(MPLCONFIGDIR))
+
+warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
+warnings.filterwarnings(
+    "ignore", message="Mean of empty slice", category=RuntimeWarning
+)
+warnings.filterwarnings(
+    "ignore",
+    message="The behavior of Index.insert with object-dtype is deprecated",
+    category=FutureWarning,
+)
 
 
 IDENTIFIER_COLS = [

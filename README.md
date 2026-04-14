@@ -57,6 +57,7 @@ python src/phase2_data_cleaning.py --sessions R S --split-by-year --aggregate-by
 python src/phase3_eda.py
 python src/phase4_feature_engineering.py --track-type-path data/track_types.csv
 python src/phase5_model_training.py --top10-classification
+python src/phase7_evaluation.py
 ```
 
 Interactive weekend prediction:
@@ -286,6 +287,31 @@ Prediction columns (2025):
 - race_position
 - predicted_position
 - predicted_rank
+
+### Phase 7 - Evaluation and Improvement
+Script: `src/phase7_evaluation.py`
+
+What it does:
+- Evaluates Phase 5 prediction files (race/sprint/qualifying) for 2025
+- Writes summary metrics (MAE, RMSE, Spearman, Top-10 precision/recall)
+- Produces per-race breakdowns and driver error summaries
+- Highlights largest errors for review
+
+Example:
+```bash
+python src/phase7_evaluation.py
+```
+
+Outputs:
+```
+data/evaluation/summary_metrics_2025.csv
+data/evaluation/per_race_metrics_2025.csv
+data/evaluation/driver_error_summary_2025.csv
+data/evaluation/largest_errors_2025.csv
+data/evaluation/report_phase7.txt
+data/evaluation/phase6_eval_2026.csv (if 2026 results are available)
+data/evaluation/plots/mae_by_model_target_2025.png
+```
 
 ## Notes
 - If Phase 2 fails, check that you already ran Phase 1 and that `data/raw/fastf1` exists.
