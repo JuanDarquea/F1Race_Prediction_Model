@@ -49,15 +49,21 @@ This project is a living document of my growth in AI and Data Science. As I refi
 ## Project Phases (Current Setup)
 
 ## Quickstart
-Run the full pipeline from raw data to model training:
+Run the full pipeline from raw data to Monte Carlo simulation:
 
 ```bash
-python src/phase1_data_collection.py --years 2023 2024 2025 --sessions FP1 FP2 FP3 SQ S Q R
+# Note: Run Phase 1 year by year to avoid FastF1 API rate limits
+python src/phase1_data_collection.py --years 2023 --sessions FP1 FP2 FP3 SQ S Q R
+python src/phase1_data_collection.py --years 2024 --sessions FP1 FP2 FP3 SQ S Q R
+python src/phase1_data_collection.py --years 2025 --sessions FP1 FP2 FP3 SQ S Q R
+python src/phase1_data_collection.py --years 2026 --sessions FP1 FP2 FP3 SQ S Q R
 python src/phase2_data_cleaning.py --sessions R S --split-by-year --aggregate-by-driver --aggregate-by-circuit
 python src/phase3_eda.py
 python src/phase4_feature_engineering.py --track-type-path data/track_types.csv
 python src/phase5_model_training.py --top10-classification
+python src/phase6_predict_2026.py --round 4
 python src/phase7_evaluation.py
+python src/phase8_monte_carlo.py --round 4 --year 2026 --simulations 10000
 ```
 
 Interactive weekend prediction:
@@ -71,8 +77,8 @@ Script: `src/phase1_data_collection.py`
 What it does:
 - Installs and uses FastF1 cache
 - Downloads sessions for multiple seasons
-- Extracts laps, drivers, and positions
-- Saves raw CSVs per session
+- Extracts laps, drivers, positions, and weather data
+- Saves raw CSVs per session (laps.csv, results.csv, drivers.csv, weather.csv)
 
 Example:
 ```bash
@@ -82,9 +88,10 @@ python src/phase1_data_collection.py --years 2023 2024 2025 --sessions FP1 FP2 F
 Outputs (example):
 ```
 data/raw/fastf1/
-  2022/01_Bahrain/FP1/laps.csv
-  2022/01_Bahrain/Q/results.csv
-  2022/01_Bahrain/R/drivers.csv
+  2023/01_Bahrain/FP1/laps.csv
+  2023/01_Bahrain/Q/results.csv
+  2023/01_Bahrain/R/drivers.csv
+  2023/01_Bahrain/R/weather.csv
 ```
 
 ### Phase 2 - Data Cleaning
@@ -166,6 +173,10 @@ What it does:
 - Builds per-driver/per-race feature rows
 - Adds sprint weekend features (sprint result + sprint qualifying)
 - Adds practice pace, track types, and rolling driver/team stats
+- Extracts weather features (temperature, humidity, rainfall, wet flag)
+- Extracts tire strategy features (stints, compound, tire life)
+- Extracts pit stop features (avg pit time, total time lost)
+- Applies tiered NaN imputation (group median > rolling historical > season median)
 
 Example:
 ```bash
@@ -312,6 +323,35 @@ data/evaluation/report_phase7.txt
 data/evaluation/phase6_eval_2026.csv (if 2026 results are available)
 data/evaluation/plots/mae_by_model_target_2025.png
 ```
+
+### Phase 8 - Monte Carlo Race Simulation
+Script: `src/phase8_monte_carlo.py`
+
+What it does:
+- Runs 10,000 (configurable) race simulations with randomness in qualifying, pit strategy, tire degradation, DNFs, and safety cars
+- Derives simulation parameters from historical data (prediction noise, start gains, DNF rates, safety car frequency, tire compound distributions, pit time distributions)
+- Models races in phases: Qualifying > Race Start > Tire Stints > Race Events > Final Ranking
+- Outputs probability distributions over finishing positions for every driver
+
+Example:
+```bash
+python src/phase8_monte_carlo.py --round 4 --year 2026 --simulations 10000
+```
+
+Outputs:
+```
+models/monte_carlo/simulation_raw_2026_round04.csv      (full probability matrix: 20 drivers x 20 positions)
+models/monte_carlo/simulation_summary_2026_round04.csv   (win %, podium %, points %, expected finish, 90% CI, DNF %)
+models/monte_carlo/report_2026_round04.txt               (human-readable report)
+models/monte_carlo/position_heatmap_2026_round04.png     (position distribution heatmap)
+models/monte_carlo/probability_bars_2026_round04.png     (win/podium/points bar chart)
+```
+
+Summary columns:
+- win_pct, podium_pct, points_pct
+- expected_finish (probability-weighted average position)
+- ci_90_low, ci_90_high (90% confidence interval)
+- dnf_pct (retirement probability)
 
 ## Notes
 - If Phase 2 fails, check that you already ran Phase 1 and that `data/raw/fastf1` exists.

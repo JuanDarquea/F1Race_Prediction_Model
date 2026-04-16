@@ -133,9 +133,28 @@ def _save_drivers(session, out_dir: Path) -> Optional[Path]:
     return out_path
 
 
+def _save_weather(session, out_dir: Path) -> Optional[Path]:
+    try:
+        if session.weather_data is None or session.weather_data.empty:
+            event_name = str(session.event["EventName"])
+            print(f"[warn] No weather data for {event_name} {session.name}")
+            return None
+    except f1_exceptions.DataNotLoadedError:
+        return None
+
+    df = session.weather_data.copy()
+    meta = _session_meta(session)
+    for key, value in meta.items():
+        df[key] = value
+
+    out_path = out_dir / "weather.csv"
+    df.to_csv(out_path, index=False)
+    return out_path
+
+
 def _load_session(year: int, round_number: int, session_code: str):
     session = fastf1.get_session(year, round_number, session_code)
-    session.load(laps=True, telemetry=False, weather=False, messages=False)
+    session.load(laps=True, telemetry=False, weather=True, messages=False)
     return session
 
 
@@ -183,6 +202,7 @@ def collect_for_seasons(
                     laps_path = _save_laps(session, out_dir)
                     results_path = _save_results(session, out_dir)
                     drivers_path = _save_drivers(session, out_dir)
+                    weather_path = _save_weather(session, out_dir)
                 except f1_exceptions.DataNotLoadedError as exc:
                     print(
                         f"[skip] {year} {event_name} ({round_number}) {session_code}: "
@@ -192,7 +212,7 @@ def collect_for_seasons(
 
                 print(
                     f"[ok] {year} {event_name} ({round_number}) {session_code} -> "
-                    f"laps={bool(laps_path)}, results={bool(results_path)}, drivers={bool(drivers_path)}"
+                    f"laps={bool(laps_path)}, results={bool(results_path)}, drivers={bool(drivers_path)}, weather={bool(weather_path)}"
                 )
 
 

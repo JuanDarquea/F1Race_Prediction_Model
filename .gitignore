@@ -32,6 +32,7 @@ README.md
 # Data files
 data/
 notebooks/
+docs/
 
 # Model files
 models/
