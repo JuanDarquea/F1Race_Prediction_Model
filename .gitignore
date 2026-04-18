@@ -33,6 +33,7 @@ README.md
 data/
 notebooks/
 docs/
+.superpowers/
 
 # Model files
 models/
