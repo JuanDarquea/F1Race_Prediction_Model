@@ -18,6 +18,7 @@ __pycache__/
 # IDE
 .vscode/*
 .codex
+.claude
 
 # Output directories
 Translated_Docs/
