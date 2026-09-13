@@ -1,6 +1,10 @@
 import pandas as pd
 
-from phase10_classifiers import train_top10_race, train_winner_podium
+from phase10_classifiers import (
+    _fit_calibrated_binary,
+    train_top10_race,
+    train_winner_podium,
+)
 
 
 def _synthetic_dataset() -> pd.DataFrame:
@@ -82,3 +86,25 @@ def test_train_top10_race_writes_fold_metrics_and_calibration(tmp_path):
     assert (tmp_path / "calibration_table_last_fold.csv").exists()
     predict_files = list(tmp_path.glob("predict_2025_round*.csv"))
     assert len(predict_files) == 1
+
+
+def test_fit_calibrated_binary_all_zero_train_returns_near_zero_probs():
+    X_train = pd.DataFrame({"feat": [1.0, 2.0, 3.0]})
+    y_train = pd.Series([0, 0, 0])
+    X_test = pd.DataFrame({"feat": [4.0, 5.0]})
+
+    y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
+
+    assert len(y_prob) == len(X_test)
+    assert all(p == 0.0 for p in y_prob)
+
+
+def test_fit_calibrated_binary_all_one_train_returns_near_one_probs():
+    X_train = pd.DataFrame({"feat": [1.0, 2.0, 3.0]})
+    y_train = pd.Series([1, 1, 1])
+    X_test = pd.DataFrame({"feat": [4.0, 5.0]})
+
+    y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
+
+    assert len(y_prob) == len(X_test)
+    assert all(p == 1.0 for p in y_prob)

@@ -152,6 +152,9 @@ TOP10_RACE_DROP_COLS = [
 
 
 def _fit_calibrated_binary(X_train, y_train, X_test):
+    if y_train.nunique() < 2:
+        only_class = int(y_train.iloc[0])
+        return [float(only_class)] * len(X_test)
     base_model = XGBClassifier(
         n_estimators=400,
         learning_rate=0.05,
@@ -161,9 +164,6 @@ def _fit_calibrated_binary(X_train, y_train, X_test):
         objective="binary:logistic",
         random_state=42,
     )
-    if y_train.nunique() < 2:
-        base_model.fit(X_train, y_train)
-        return base_model.predict_proba(X_test)[:, -1]
     calibrated = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
     calibrated.fit(X_train, y_train)
     return calibrated.predict_proba(X_test)[:, 1]
