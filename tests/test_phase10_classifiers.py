@@ -2,6 +2,7 @@ import pandas as pd
 
 from phase10_classifiers import (
     _fit_calibrated_binary,
+    train_top10_qualifying,
     train_top10_race,
     train_winner_podium,
 )
@@ -108,3 +109,16 @@ def test_fit_calibrated_binary_all_one_train_returns_near_one_probs():
 
     assert len(y_prob) == len(X_test)
     assert all(p == 1.0 for p in y_prob)
+
+
+def test_train_top10_qualifying_writes_fold_metrics(tmp_path):
+    df = _synthetic_top10_dataset()
+    fold_metrics = train_top10_qualifying(df, output_dir=tmp_path)
+
+    assert len(fold_metrics) == 2
+    assert {"precision", "recall", "log_loss", "brier_score", "roc_auc"}.issubset(
+        fold_metrics.columns
+    )
+    assert (tmp_path / "fold_metrics.csv").exists()
+    predict_files = list(tmp_path.glob("predict_2025_round*.csv"))
+    assert len(predict_files) == 1

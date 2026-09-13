@@ -5,6 +5,7 @@ trained directly on its true label (multi-class win/podium, or binary
 top-10) and walk-forward validated across every available season.
 """
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -219,3 +220,88 @@ def train_top10_race(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
             output_dir / "calibration_table_last_fold.csv", index=False
         )
     return fold_metrics
+
+
+TOP10_QUALIFYING_DROP_COLS = [
+    "race_position",
+    "race_points",
+    "sprint_position",
+    "sprint_points",
+    "sprint_qualifying_position",
+    "status",
+    "driver_id",
+]
+
+
+def train_top10_qualifying(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    """Walk-forward train/evaluate a binary top-10-qualifying classifier."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    working = df.dropna(subset=["qualifying_position"]).copy()
+    working["is_top10"] = (working["qualifying_position"] <= 10).astype(int)
+
+    fold_rows = []
+    last_fold_predictions = None
+    last_y_test = None
+    last_y_prob = None
+    for train_seasons, test_season in expanding_season_folds(working):
+        train_raw = working[working["season"].isin(train_seasons)]
+        test_raw = working[working["season"] == test_season]
+
+        train_enc = clean_and_encode(
+            train_raw, drop_cols=TOP10_QUALIFYING_DROP_COLS + ["qualifying_position"]
+        )
+        test_enc = clean_and_encode(
+            test_raw, drop_cols=TOP10_QUALIFYING_DROP_COLS + ["qualifying_position"]
+        )
+        train_enc, test_enc = align_train_test(train_enc, test_enc)
+
+        cols = feature_columns(train_enc, NON_FEATURE_COLS + ["is_top10"])
+        X_train, y_train = train_enc[cols], train_enc["is_top10"]
+        X_test, y_test = test_enc[cols], test_enc["is_top10"]
+
+        y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
+
+        metrics = binary_classification_metrics(y_test.to_numpy(), y_prob)
+        metrics["train_seasons"] = ",".join(str(s) for s in train_seasons)
+        metrics["test_season"] = test_season
+        fold_rows.append(metrics)
+
+        predictions = test_raw[["driver_name", "team", "season", "round"]].reset_index(
+            drop=True
+        )
+        predictions["p_top10_qualifying"] = y_prob
+        last_fold_predictions = predictions
+        last_y_test, last_y_prob = y_test.to_numpy(), y_prob
+
+    fold_metrics = pd.DataFrame(fold_rows)
+    fold_metrics.to_csv(output_dir / "fold_metrics.csv", index=False)
+    if last_fold_predictions is not None:
+        last_fold_predictions.to_csv(
+            output_dir / _latest_prediction_filename(last_fold_predictions), index=False
+        )
+        calibration_table(last_y_test, last_y_prob).to_csv(
+            output_dir / "calibration_table_last_fold.csv", index=False
+        )
+    return fold_metrics
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Phase 10: Winner/top-10 classifiers")
+    parser.add_argument("--features", default=str(FEATURE_PATH))
+    parser.add_argument("--elo-history", default=str(ELO_HISTORY_PATH))
+    args = parser.parse_args()
+
+    df = load_dataset_with_elo(Path(args.features), Path(args.elo_history))
+
+    winner_metrics = train_winner_podium(df, MODEL_DIR / "winner_podium")
+    print("[winner_podium] fold metrics:\n", winner_metrics)
+
+    top10_race_metrics = train_top10_race(df, MODEL_DIR / "top10_race")
+    print("[top10_race] fold metrics:\n", top10_race_metrics)
+
+    top10_qual_metrics = train_top10_qualifying(df, MODEL_DIR / "top10_qualifying")
+    print("[top10_qualifying] fold metrics:\n", top10_qual_metrics)
+
+
+if __name__ == "__main__":
+    main()
