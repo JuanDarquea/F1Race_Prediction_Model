@@ -49,6 +49,10 @@ IN_RACE_MEASUREMENT_COLS = [
     "max_tyre_life",
     "avg_pit_time",
     "total_pit_time_lost",
+    # race_track_temp minus the qualifying track temp (phase4:254). Differencing
+    # does not launder the leak: it still carries a race-session measurement, so
+    # it is unknowable before qualifying AND before the race.
+    "temp_delta_quali_race",
 ]
 
 WINNER_PODIUM_DROP_COLS = [
@@ -284,9 +288,6 @@ TOP10_QUALIFYING_DROP_COLS = [
     "sprint_qualifying_position",
     "status",
     "driver_id",
-    # Needs the race session's track temperature, which does not exist yet at
-    # the time qualifying is being predicted.
-    "temp_delta_quali_race",
 ] + IN_RACE_MEASUREMENT_COLS
 
 

@@ -27,6 +27,9 @@ IN_RACE_LEAKAGE_COLS = [
     "max_tyre_life",
     "avg_pit_time",
     "total_pit_time_lost",
+    # race_track_temp minus the qualifying track temp: still carries a race
+    # measurement, so it leaks into pre-race models too, not just pre-qualifying.
+    "temp_delta_quali_race",
 ]
 
 
@@ -40,10 +43,15 @@ def test_drop_cols_exclude_in_race_leakage_columns(drop_cols):
     assert missing == []
 
 
-def test_qualifying_drop_cols_exclude_race_session_temp_delta():
-    # temp_delta_quali_race needs the race session's track temp, which does not
-    # exist yet when qualifying is being predicted.
-    assert "temp_delta_quali_race" in TOP10_QUALIFYING_DROP_COLS
+@pytest.mark.parametrize(
+    "drop_cols",
+    [WINNER_PODIUM_DROP_COLS, TOP10_RACE_DROP_COLS, TOP10_QUALIFYING_DROP_COLS],
+    ids=["winner_podium", "top10_race", "top10_qualifying"],
+)
+def test_all_models_drop_race_session_temp_delta(drop_cols):
+    # temp_delta_quali_race = race_track_temp - quali_track_temp, so it embeds a
+    # race-session measurement. Unknowable before qualifying AND before the race.
+    assert "temp_delta_quali_race" in drop_cols
 
 
 def _synthetic_dataset() -> pd.DataFrame:
