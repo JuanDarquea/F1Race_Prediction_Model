@@ -21,10 +21,12 @@ def load_regression_top10_baseline(summary_path: Path, target: str) -> Optional[
     if subset.empty:
         return None
     best = subset.loc[subset["mae"].idxmin()]
+    # Suffixed with the season because summary_metrics_2025.csv is a single
+    # 2023-24 -> 2025 evaluation, not a per-season series.
     return {
-        "baseline_model": best["model"],
-        "baseline_top10_precision": float(best["top10_precision"]),
-        "baseline_top10_recall": float(best["top10_recall"]),
+        "baseline_model_2025": best["model"],
+        "baseline_top10_precision_2025": float(best["top10_precision"]),
+        "baseline_top10_recall_2025": float(best["top10_recall"]),
     }
 
 
@@ -34,35 +36,35 @@ def build_comparison_table(
     summary_path: Path = SUMMARY_METRICS_PATH,
 ) -> pd.DataFrame:
     """One row per (classifier, test_season): new classifier metrics next to the
-    best regression-derived baseline for the same target."""
-    rows = []
-    race_baseline = load_regression_top10_baseline(summary_path, "race")
-    for _, fold in top10_race_fold_metrics.iterrows():
-        row = {
-            "classifier": "top10_race",
-            "test_season": fold["test_season"],
-            "classifier_precision": fold["precision"],
-            "classifier_recall": fold["recall"],
-            "classifier_log_loss": fold["log_loss"],
-            "classifier_brier_score": fold["brier_score"],
-        }
-        if race_baseline:
-            row.update(race_baseline)
-        rows.append(row)
+    best regression-derived baseline for the same target.
 
-    qual_baseline = load_regression_top10_baseline(summary_path, "qualifying")
-    for _, fold in top10_qualifying_fold_metrics.iterrows():
-        row = {
-            "classifier": "top10_qualifying",
-            "test_season": fold["test_season"],
-            "classifier_precision": fold["precision"],
-            "classifier_recall": fold["recall"],
-            "classifier_log_loss": fold["log_loss"],
-            "classifier_brier_score": fold["brier_score"],
-        }
-        if qual_baseline:
-            row.update(qual_baseline)
-        rows.append(row)
+    Two precision/recall pairs are reported per classifier. `classifier_precision`
+    / `classifier_recall` use a fixed 0.5 probability threshold, which selects a
+    variable number of drivers per race and is therefore NOT comparable to the
+    baseline's numbers. `classifier_top10_cut_precision` / `_recall` use Phase 5's
+    own selection rule (exactly as many picks as there are true top-10 finishers),
+    and are the like-for-like comparison against the baseline columns.
+    """
+    rows = []
+    for classifier, fold_metrics, target in (
+        ("top10_race", top10_race_fold_metrics, "race"),
+        ("top10_qualifying", top10_qualifying_fold_metrics, "qualifying"),
+    ):
+        baseline = load_regression_top10_baseline(summary_path, target)
+        for _, fold in fold_metrics.iterrows():
+            row = {
+                "classifier": classifier,
+                "test_season": fold["test_season"],
+                "classifier_precision": fold["precision"],
+                "classifier_recall": fold["recall"],
+                "classifier_top10_cut_precision": fold["top10_cut_precision"],
+                "classifier_top10_cut_recall": fold["top10_cut_recall"],
+                "classifier_log_loss": fold["log_loss"],
+                "classifier_brier_score": fold["brier_score"],
+            }
+            if baseline:
+                row.update(baseline)
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -77,7 +79,20 @@ def _write_report(
             "Top-10 classifiers vs. best regression-derived baseline (by test season):\n\n"
         )
         f.write(comparison.to_string(index=False))
-        f.write("\n\nWinner/Podium classifier fold metrics:\n\n")
+        f.write("\n\nNotes on reading this table:\n")
+        f.write(
+            "  - The baseline_*_2025 columns are a single fixed 2023-24 -> 2025 evaluation\n"
+            "    repeated on every row, not re-computed per season, so only the 2025 rows\n"
+            "    are a genuinely matched (same test season) comparison.\n"
+        )
+        f.write(
+            "  - classifier_precision/recall use a fixed 0.5 probability threshold, which\n"
+            "    picks a variable number of drivers per race; they are NOT comparable to the\n"
+            "    baseline columns. classifier_top10_cut_precision/recall use Phase 5's own\n"
+            "    selection rule (exactly as many picks as true top-10 finishers per race) and\n"
+            "    are the like-for-like comparison. That rule forces precision == recall.\n"
+        )
+        f.write("\nWinner/Podium classifier fold metrics:\n\n")
         f.write(winner_podium_metrics.to_string(index=False))
         f.write("\n")
 

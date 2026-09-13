@@ -68,6 +68,30 @@ def binary_classification_metrics(y_true: np.ndarray, y_prob: np.ndarray) -> dic
     return metrics
 
 
+def top10_cut_precision_recall(
+    race_keys: pd.DataFrame, y_true: np.ndarray, y_prob: np.ndarray
+) -> dict:
+    """Precision/recall using the SAME selection rule as the regression baseline:
+    per race, take exactly the actual number of true top-10 finishers (or fewer
+    if the race has fewer classified drivers) as the cutoff, and compare against
+    that many highest-probability picks. Directly comparable to Phase 5's
+    top10_precision/top10_recall, unlike a fixed 0.5 threshold."""
+    frame = race_keys.reset_index(drop=True).copy()
+    frame["y_true"] = y_true
+    frame["y_prob"] = y_prob
+    precisions = []
+    for _, group in frame.groupby(["season", "round"]):
+        k = int(group["y_true"].sum())
+        if k == 0:
+            continue
+        k = min(k, len(group))
+        true_top = set(group.index[group["y_true"] == 1])
+        pred_top = set(group.nlargest(k, "y_prob").index)
+        precisions.append(len(true_top & pred_top) / k)
+    value = float(np.mean(precisions)) if precisions else float("nan")
+    return {"top10_cut_precision": value, "top10_cut_recall": value}
+
+
 def calibration_table(
     y_true: np.ndarray, y_prob: np.ndarray, n_buckets: int = 5
 ) -> pd.DataFrame:

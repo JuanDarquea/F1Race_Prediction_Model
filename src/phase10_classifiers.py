@@ -7,7 +7,9 @@ top-10) and walk-forward validated across every available season.
 
 import argparse
 from pathlib import Path
+from typing import Tuple
 
+import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBClassifier
@@ -19,6 +21,7 @@ from common.classifier_utils import (
     clean_and_encode,
     feature_columns,
     multiclass_top3_metrics,
+    top10_cut_precision_recall,
     top3_accuracy_by_race,
 )
 from common.walk_forward import expanding_season_folds
@@ -30,6 +33,24 @@ MODEL_DIR = PROJECT_ROOT / "models"
 
 NON_FEATURE_COLS = ["season", "round", "driver_id"]
 
+# Columns that are only known once the session has been run. `dnf_flag` is
+# `status` numerically re-encoded (see phase4_feature_engineering), and the rest
+# are weather/tyre/pit measurements taken during the race itself, so none of
+# them can be fed to a pre-race prediction without leaking the outcome.
+IN_RACE_MEASUREMENT_COLS = [
+    "dnf_flag",
+    "race_air_temp",
+    "race_track_temp",
+    "race_humidity",
+    "race_rainfall",
+    "race_is_wet",
+    "num_stints",
+    "avg_tyre_life",
+    "max_tyre_life",
+    "avg_pit_time",
+    "total_pit_time_lost",
+]
+
 WINNER_PODIUM_DROP_COLS = [
     "race_points",
     "sprint_position",
@@ -37,7 +58,7 @@ WINNER_PODIUM_DROP_COLS = [
     "sprint_qualifying_position",
     "status",
     "driver_id",
-]
+] + IN_RACE_MEASUREMENT_COLS
 
 
 def load_dataset_with_elo(
@@ -62,12 +83,37 @@ def _finish_class(race_position: pd.Series) -> pd.Series:
     return finish_class
 
 
-def _latest_prediction_filename(predictions: pd.DataFrame) -> str:
+def _latest_season_round(predictions: pd.DataFrame) -> Tuple[int, int]:
+    """The most recent (season, round) present in a fold's prediction frame."""
     latest_season = int(predictions["season"].max())
     latest_round = int(
-        predictions[predictions["season"] == latest_season]["round"].max()
+        predictions.loc[predictions["season"] == latest_season, "round"].max()
     )
+    return latest_season, latest_round
+
+
+def _latest_prediction_filename(predictions: pd.DataFrame) -> str:
+    latest_season, latest_round = _latest_season_round(predictions)
     return f"predict_{latest_season}_round{latest_round:02d}.csv"
+
+
+def _write_latest_round_predictions(
+    predictions: pd.DataFrame, output_dir: Path
+) -> Path:
+    """Write only the latest (season, round) slice of a fold's predictions.
+
+    A fold's test set spans the whole test season, but the file is named after a
+    single round, so it is filtered down to that round before writing - otherwise
+    predict_<season>_round<NN>.csv holds every round of the season.
+    """
+    latest_season, latest_round = _latest_season_round(predictions)
+    latest = predictions[
+        (predictions["season"] == latest_season)
+        & (predictions["round"] == latest_round)
+    ]
+    path = output_dir / _latest_prediction_filename(predictions)
+    latest.to_csv(path, index=False)
+    return path
 
 
 def train_winner_podium(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
@@ -136,9 +182,7 @@ def train_winner_podium(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
     fold_metrics = pd.DataFrame(fold_rows)
     fold_metrics.to_csv(output_dir / "fold_metrics.csv", index=False)
     if last_fold_predictions is not None:
-        last_fold_predictions.to_csv(
-            output_dir / _latest_prediction_filename(last_fold_predictions), index=False
-        )
+        _write_latest_round_predictions(last_fold_predictions, output_dir)
     return fold_metrics
 
 
@@ -149,13 +193,18 @@ TOP10_RACE_DROP_COLS = [
     "sprint_qualifying_position",
     "status",
     "driver_id",
-]
+] + IN_RACE_MEASUREMENT_COLS
 
 
 def _fit_calibrated_binary(X_train, y_train, X_test):
     if y_train.nunique() < 2:
+        # Degenerate fold: nothing to learn, so lean towards the only class seen
+        # but stay short of certainty — hard 0.0/1.0 sends log_loss to ~18 the
+        # moment a single test label disagrees. Returns an ndarray like every
+        # other path, so the downstream metrics helpers work unchanged.
         only_class = int(y_train.iloc[0])
-        return [float(only_class)] * len(X_test)
+        clipped = 0.99 if only_class == 1 else 0.01
+        return np.full(len(X_test), clipped)
     base_model = XGBClassifier(
         n_estimators=400,
         learning_rate=0.05,
@@ -199,6 +248,13 @@ def train_top10_race(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
         y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
 
         metrics = binary_classification_metrics(y_test.to_numpy(), y_prob)
+        metrics.update(
+            top10_cut_precision_recall(
+                test_raw.reset_index(drop=True)[["season", "round"]],
+                y_test.to_numpy(),
+                y_prob,
+            )
+        )
         metrics["train_seasons"] = ",".join(str(s) for s in train_seasons)
         metrics["test_season"] = test_season
         fold_rows.append(metrics)
@@ -213,9 +269,7 @@ def train_top10_race(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
     fold_metrics = pd.DataFrame(fold_rows)
     fold_metrics.to_csv(output_dir / "fold_metrics.csv", index=False)
     if last_fold_predictions is not None:
-        last_fold_predictions.to_csv(
-            output_dir / _latest_prediction_filename(last_fold_predictions), index=False
-        )
+        _write_latest_round_predictions(last_fold_predictions, output_dir)
         calibration_table(last_y_test, last_y_prob).to_csv(
             output_dir / "calibration_table_last_fold.csv", index=False
         )
@@ -230,7 +284,10 @@ TOP10_QUALIFYING_DROP_COLS = [
     "sprint_qualifying_position",
     "status",
     "driver_id",
-]
+    # Needs the race session's track temperature, which does not exist yet at
+    # the time qualifying is being predicted.
+    "temp_delta_quali_race",
+] + IN_RACE_MEASUREMENT_COLS
 
 
 def train_top10_qualifying(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
@@ -262,6 +319,13 @@ def train_top10_qualifying(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
         y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
 
         metrics = binary_classification_metrics(y_test.to_numpy(), y_prob)
+        metrics.update(
+            top10_cut_precision_recall(
+                test_raw.reset_index(drop=True)[["season", "round"]],
+                y_test.to_numpy(),
+                y_prob,
+            )
+        )
         metrics["train_seasons"] = ",".join(str(s) for s in train_seasons)
         metrics["test_season"] = test_season
         fold_rows.append(metrics)
@@ -276,9 +340,7 @@ def train_top10_qualifying(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
     fold_metrics = pd.DataFrame(fold_rows)
     fold_metrics.to_csv(output_dir / "fold_metrics.csv", index=False)
     if last_fold_predictions is not None:
-        last_fold_predictions.to_csv(
-            output_dir / _latest_prediction_filename(last_fold_predictions), index=False
-        )
+        _write_latest_round_predictions(last_fold_predictions, output_dir)
         calibration_table(last_y_test, last_y_prob).to_csv(
             output_dir / "calibration_table_last_fold.csv", index=False
         )

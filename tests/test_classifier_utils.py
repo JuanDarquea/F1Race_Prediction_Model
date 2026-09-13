@@ -9,6 +9,7 @@ from common.classifier_utils import (
     clean_and_encode,
     feature_columns,
     multiclass_top3_metrics,
+    top10_cut_precision_recall,
     top3_accuracy_by_race,
 )
 
@@ -95,3 +96,35 @@ def test_top3_accuracy_by_race_perfect_pick():
     )  # top-3 by p_win = indices 0,1,2 = classes 1,2,3
     accuracy = top3_accuracy_by_race(race_keys, y_true_class, p_win)
     assert accuracy == pytest.approx(1.0)
+
+
+def test_top10_cut_precision_recall_matches_hand_computed_value():
+    # Two races of 4 drivers each; k = number of true positives in that race.
+    # Race 1: k=2 (rows 0,1 true). Top-2 by prob = rows 0,2 -> 1/2 correct.
+    # Race 2: k=2 (rows 4,5 true). Top-2 by prob = rows 4,5 -> 2/2 correct.
+    # Mean across races = (0.5 + 1.0) / 2 = 0.75.
+    race_keys = pd.DataFrame({"season": [2025] * 8, "round": [1, 1, 1, 1, 2, 2, 2, 2]})
+    y_true = np.array([1, 1, 0, 0, 1, 1, 0, 0])
+    y_prob = np.array([0.9, 0.2, 0.8, 0.1, 0.9, 0.8, 0.2, 0.1])
+
+    result = top10_cut_precision_recall(race_keys, y_true, y_prob)
+    assert result["top10_cut_precision"] == pytest.approx(0.75)
+    # Same selection rule as Phase 5: picking exactly k makes precision == recall.
+    assert result["top10_cut_recall"] == pytest.approx(0.75)
+
+
+def test_top10_cut_precision_recall_skips_races_with_no_positives():
+    race_keys = pd.DataFrame({"season": [2025] * 4, "round": [1, 1, 2, 2]})
+    y_true = np.array([1, 0, 0, 0])  # round 2 has no true top-10 finishers
+    y_prob = np.array([0.9, 0.1, 0.7, 0.3])
+
+    result = top10_cut_precision_recall(race_keys, y_true, y_prob)
+    assert result["top10_cut_precision"] == pytest.approx(1.0)
+
+
+def test_top10_cut_precision_recall_all_races_empty_returns_nan():
+    race_keys = pd.DataFrame({"season": [2025] * 2, "round": [1, 1]})
+    result = top10_cut_precision_recall(
+        race_keys, np.array([0, 0]), np.array([0.4, 0.6])
+    )
+    assert np.isnan(result["top10_cut_precision"])
