@@ -39,3 +39,6 @@ docs/
 # Model files
 models/
 Memory/
+
+# Handoff notes (planning scratch, not project source)
+f1-prediction-handoff.md
