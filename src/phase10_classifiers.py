@@ -8,10 +8,13 @@ top-10) and walk-forward validated across every available season.
 from pathlib import Path
 
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBClassifier
 
 from common.classifier_utils import (
     align_train_test,
+    binary_classification_metrics,
+    calibration_table,
     clean_and_encode,
     feature_columns,
     multiclass_top3_metrics,
@@ -134,5 +137,85 @@ def train_winner_podium(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
     if last_fold_predictions is not None:
         last_fold_predictions.to_csv(
             output_dir / _latest_prediction_filename(last_fold_predictions), index=False
+        )
+    return fold_metrics
+
+
+TOP10_RACE_DROP_COLS = [
+    "race_points",
+    "sprint_position",
+    "sprint_points",
+    "sprint_qualifying_position",
+    "status",
+    "driver_id",
+]
+
+
+def _fit_calibrated_binary(X_train, y_train, X_test):
+    base_model = XGBClassifier(
+        n_estimators=400,
+        learning_rate=0.05,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="binary:logistic",
+        random_state=42,
+    )
+    if y_train.nunique() < 2:
+        base_model.fit(X_train, y_train)
+        return base_model.predict_proba(X_test)[:, -1]
+    calibrated = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
+    calibrated.fit(X_train, y_train)
+    return calibrated.predict_proba(X_test)[:, 1]
+
+
+def train_top10_race(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    """Walk-forward train/evaluate a binary top-10-race-finish classifier."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    working = df.dropna(subset=["race_position"]).copy()
+    working["is_top10"] = (working["race_position"] <= 10).astype(int)
+
+    fold_rows = []
+    last_fold_predictions = None
+    last_y_test = None
+    last_y_prob = None
+    for train_seasons, test_season in expanding_season_folds(working):
+        train_raw = working[working["season"].isin(train_seasons)]
+        test_raw = working[working["season"] == test_season]
+
+        train_enc = clean_and_encode(
+            train_raw, drop_cols=TOP10_RACE_DROP_COLS + ["race_position"]
+        )
+        test_enc = clean_and_encode(
+            test_raw, drop_cols=TOP10_RACE_DROP_COLS + ["race_position"]
+        )
+        train_enc, test_enc = align_train_test(train_enc, test_enc)
+
+        cols = feature_columns(train_enc, NON_FEATURE_COLS + ["is_top10"])
+        X_train, y_train = train_enc[cols], train_enc["is_top10"]
+        X_test, y_test = test_enc[cols], test_enc["is_top10"]
+
+        y_prob = _fit_calibrated_binary(X_train, y_train, X_test)
+
+        metrics = binary_classification_metrics(y_test.to_numpy(), y_prob)
+        metrics["train_seasons"] = ",".join(str(s) for s in train_seasons)
+        metrics["test_season"] = test_season
+        fold_rows.append(metrics)
+
+        predictions = test_raw[["driver_name", "team", "season", "round"]].reset_index(
+            drop=True
+        )
+        predictions["p_top10"] = y_prob
+        last_fold_predictions = predictions
+        last_y_test, last_y_prob = y_test.to_numpy(), y_prob
+
+    fold_metrics = pd.DataFrame(fold_rows)
+    fold_metrics.to_csv(output_dir / "fold_metrics.csv", index=False)
+    if last_fold_predictions is not None:
+        last_fold_predictions.to_csv(
+            output_dir / _latest_prediction_filename(last_fold_predictions), index=False
+        )
+        calibration_table(last_y_test, last_y_prob).to_csv(
+            output_dir / "calibration_table_last_fold.csv", index=False
         )
     return fold_metrics
