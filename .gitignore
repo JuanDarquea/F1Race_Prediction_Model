@@ -42,3 +42,13 @@ Memory/
 
 # Handoff notes (planning scratch, not project source)
 f1-prediction-handoff.md
+
+# Images and video (generated social posts; publish them, don't commit them)
+*.png
+*.jpg
+*.jpeg
+*.mp4
+
+# Social image/caption generator (channel-specific, kept local)
+src/phase13_social_images.py
+tests/test_phase13_social_images.py

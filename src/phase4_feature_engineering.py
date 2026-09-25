@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 
@@ -14,8 +14,8 @@ def _find_result_files(session_code: str) -> List[Path]:
     return sorted(RAW_DIR.glob(f"*/**/{session_code}/results.csv"))
 
 
-def _find_lap_files(session_code: str) -> List[Path]:
-    return sorted(RAW_DIR.glob(f"*/**/{session_code}/laps.csv"))
+def _find_lap_files(session_code: str, raw_dir: Optional[Path] = None) -> List[Path]:
+    return sorted((raw_dir or RAW_DIR).glob(f"*/**/{session_code}/laps.csv"))
 
 
 def _find_weather_files(session_code: str) -> List[Path]:
@@ -132,16 +132,20 @@ def _lap_time_seconds(df: pd.DataFrame) -> pd.Series:
     return pd.Series([pd.NA] * len(df))
 
 
-def _load_practice_pace() -> pd.DataFrame:
+def _load_practice_pace(raw_dir: Optional[Path] = None) -> pd.DataFrame:
     frames = []
     for session_code in ["FP1", "FP2", "FP3"]:
-        for path in _find_lap_files(session_code):
+        for path in _find_lap_files(session_code, raw_dir):
             df = pd.read_csv(path)
             if df.empty:
                 continue
             driver_key = _pick_driver_key(df)
             df = df.copy()
-            df["driver_name"] = _driver_name_from_df(df, driver_key)
+            # laps.csv only carries the driver abbreviation; map it to FullName via
+            # the session's results.csv so it merges with _load_results() names.
+            name_map = _build_name_map(path)
+            raw_names = _driver_name_from_df(df, driver_key)
+            df["driver_name"] = raw_names.astype(str).map(name_map).fillna(raw_names)
             df["season"] = df.get("Season", pd.NA)
             df["round"] = df.get("RoundNumber", pd.NA)
             df["track"] = df.get("EventName", pd.NA)
@@ -173,6 +177,16 @@ def _load_practice_pace() -> pd.DataFrame:
         .reset_index()
     )
     return best_overall
+
+
+def add_practice_rank_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-weekend rank, percentile and gap-to-best derived from practice_pace."""
+    out = df.copy()
+    weekend = out.groupby(["season", "round"], dropna=True)["practice_pace"]
+    out["practice_pace_rank"] = weekend.rank(method="min")
+    out["practice_pace_percentile"] = weekend.rank(pct=True)
+    out["practice_pace_gap_to_best"] = out["practice_pace"] - weekend.transform("min")
+    return out
 
 
 def _load_weather_features() -> pd.DataFrame:
@@ -663,15 +677,7 @@ def build_feature_dataset(track_type_path: Path) -> pd.DataFrame:
     else:
         base["dnf_flag"] = pd.NA
 
-    base["practice_pace_rank"] = base.groupby(["season", "round"], dropna=True)[
-        "practice_pace"
-    ].rank(method="min")
-    base["practice_pace_percentile"] = base.groupby(["season", "round"], dropna=True)[
-        "practice_pace"
-    ].rank(pct=True)
-    base["practice_pace_gap_to_best"] = base["practice_pace"] - base.groupby(
-        ["season", "round"], dropna=True
-    )["practice_pace"].transform("min")
+    base = add_practice_rank_features(base)
 
     base = _add_rolling_features(base)
 
