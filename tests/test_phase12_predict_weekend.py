@@ -10,6 +10,7 @@ from phase12_predict_weekend import (
     fit_win_temperature,
     load_practice_pace,
     load_qualifying_grid,
+    load_weekend_roster,
     load_track_type,
     normalize_podium_probabilities,
     predict_weekend,
@@ -439,3 +440,41 @@ def test_summarize_quali_oof_reports_how_often_the_practice_leader_takes_pole():
     summary = summarize_quali_oof(oof)
     assert summary["practice_leader_pole_rate"] == pytest.approx(2 / 3)
     assert "practice_leader_pole_rate" not in summarize_quali_oof(_quali_oof())
+
+
+def test_build_weekend_features_uses_the_real_roster_not_last_rounds_lineup():
+    df = _synthetic_dataset()
+    df["team_avg_finish"] = df["team"].map(
+        {"Team0": 1.0, "Team1": 2.0, "Team2": 3.0, "Team3": 4.0}
+    )
+    # D3 sat out the latest round (still on the grid in round 1); D11 leaves.
+    df = df[
+        ~((df["season"] == 2025) & (df["round"] == 2) & (df["driver_name"] == "D3"))
+    ]
+    roster = {f"D{i}": f"Team{i % 4}" for i in range(11)}
+    roster["D5"] = "Team0"  # D5 changed team
+    weekend = _build_weekend_features(
+        df, _synthetic_elo_history(), 2025, 3, "Baku", False, roster=roster
+    )
+    assert set(weekend["driver_name"]) == set(roster)
+    by_driver = weekend.set_index("driver_name")
+    assert by_driver.loc["D5", "team"] == "Team0"
+    assert by_driver.loc["D5", "team_avg_finish"] == 1.0  # team stats follow the car
+    assert (weekend["season"] == 2025).all() and (weekend["round"] == 3).all()
+    assert weekend["driver_name"].is_unique
+
+
+def test_load_weekend_roster_prefers_qualifying_then_latest_practice(tmp_path):
+    base = tmp_path / "2026" / "15_Azerbaijan_Grand_Prix"
+    for session, names in {"FP1": ["A B", "X Y"], "Q": ["A B", "C D"]}.items():
+        (base / session).mkdir(parents=True)
+        pd.DataFrame(
+            {"FullName": names, "TeamName": ["Red Bull Racing", "Alpine"]}
+        ).to_csv(base / session / "results.csv", index=False)
+    assert load_weekend_roster(2026, 15, tmp_path) == {
+        "A B": "Red Bull Racing",
+        "C D": "Alpine",
+    }
+    (base / "Q" / "results.csv").unlink()
+    assert set(load_weekend_roster(2026, 15, tmp_path)) == {"A B", "X Y"}
+    assert load_weekend_roster(2026, 16, tmp_path) is None

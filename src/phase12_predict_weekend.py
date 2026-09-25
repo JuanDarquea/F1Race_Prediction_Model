@@ -69,6 +69,23 @@ def load_qualifying_grid(
     return None
 
 
+def load_weekend_roster(
+    year: int, round_number: int, raw_root: Path = RAW_ROOT
+) -> Optional[Dict[str, str]]:
+    """Who is actually racing this weekend, as {driver_name: team}. Read from the
+    latest session already run (Q, then FP3..FP1), or None if nothing has run."""
+    for round_dir in sorted((raw_root / str(year)).glob(f"{round_number:02d}_*")):
+        for session in ("Q", "FP3", "FP2", "FP1"):
+            results_path = round_dir / session / "results.csv"
+            if not results_path.exists():
+                continue
+            results = pd.read_csv(results_path, usecols=["FullName", "TeamName"])
+            results = results.dropna(subset=["FullName", "TeamName"])
+            if not results.empty:
+                return dict(zip(results["FullName"], results["TeamName"]))
+    return None
+
+
 def load_practice_pace(
     year: int, round_number: int, raw_root: Path = RAW_ROOT
 ) -> Optional[Dict[str, float]]:
@@ -88,6 +105,32 @@ def load_track_type(track_name: str, path: Path = TRACK_TYPE_PATH) -> Optional[s
     table = pd.read_csv(path)
     match = table[table["track"] == track_name]
     return str(match["track_type"].iloc[0]) if not match.empty else None
+
+
+TEAM_LEVEL_COLS = [
+    "team_avg_finish",
+    "team_avg_qualifying",
+    "constructor_points",
+    "team_points_last_5",
+    "team_dnf_rate_last_10",
+    "team_avg_pit_time_last_5",
+]
+
+
+def _roster_rows(history: pd.DataFrame, roster: Dict[str, str]) -> pd.DataFrame:
+    """One row per driver on the real roster: their own latest known row, moved
+    to the team they drive for now (team-level columns follow the car). Drivers
+    with no history at all can't be featurized and are left out."""
+    ordered = history.sort_values(["season", "round"])
+    rows = ordered[ordered["driver_name"].isin(roster)].groupby("driver_name").tail(1)
+    rows = rows.copy()
+    rows["team"] = rows["driver_name"].map(roster)
+    latest_by_team = ordered.groupby("team").tail(1).set_index("team")
+    for col in TEAM_LEVEL_COLS:
+        if col in rows.columns:
+            follow_car = rows["team"].map(latest_by_team[col])
+            rows[col] = follow_car.where(follow_car.notna(), rows[col])
+    return rows
 
 
 def _refresh_track_features(
@@ -166,6 +209,7 @@ def _build_weekend_features(
     qualifying_grid: Optional[Dict[str, float]] = None,
     practice_pace: Optional[Dict[str, float]] = None,
     track_type: Optional[str] = None,
+    roster: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Return one feature row per driver for the target weekend.
 
@@ -181,6 +225,9 @@ def _build_weekend_features(
     columns are rebuilt from this weekend's real practice laps (a driver with
     no lap gets a missing value, imputed downstream like any other gap). The
     circuit-specific columns are always recomputed for the target circuit.
+    If roster ({driver: team}) is given, the proxy's driver list is replaced by
+    it, so lineup changes since the last round (a driver swap, a return) carry
+    over instead of copying the previous round's lineup.
     """
     if has_real_data:
         return df_with_elo[
@@ -188,7 +235,9 @@ def _build_weekend_features(
         ].copy()
 
     season_rows = df_with_elo[df_with_elo["season"] == year]
-    if not season_rows.empty:
+    if roster:
+        proxy = _roster_rows(df_with_elo, roster)
+    elif not season_rows.empty:
         proxy_round = int(season_rows["round"].max())
         proxy = season_rows[season_rows["round"] == proxy_round].copy()
     else:
@@ -723,6 +772,7 @@ def main() -> None:
     practice_pace = (
         None if has_real_data else load_practice_pace(args.year, round_number)
     )
+    roster = None if has_real_data else load_weekend_roster(args.year, round_number)
     weekend_raw = _build_weekend_features(
         df_with_elo,
         elo_history,
@@ -733,6 +783,7 @@ def main() -> None:
         qualifying_grid,
         practice_pace,
         load_track_type(track_name),
+        roster,
     )
     if weekend_raw.empty:
         raise ValueError(
