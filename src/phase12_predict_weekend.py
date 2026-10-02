@@ -69,6 +69,22 @@ def load_qualifying_grid(
     return None
 
 
+def load_race_results(
+    year: int, round_number: int, raw_root: Path = RAW_ROOT
+) -> Optional[Dict[str, float]]:
+    """Real race result for a round as {driver_name: finishing position}, or
+    None if the race hasn't happened / has no classified results yet."""
+    for round_dir in sorted((raw_root / str(year)).glob(f"{round_number:02d}_*")):
+        results_path = round_dir / "R" / "results.csv"
+        if not results_path.exists():
+            continue
+        results = pd.read_csv(results_path, usecols=["FullName", "Position"])
+        results = results.dropna(subset=["FullName", "Position"])
+        if not results.empty:
+            return dict(zip(results["FullName"], results["Position"].astype(float)))
+    return None
+
+
 def load_weekend_roster(
     year: int, round_number: int, raw_root: Path = RAW_ROOT
 ) -> Optional[Dict[str, str]]:

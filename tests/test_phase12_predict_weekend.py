@@ -10,6 +10,7 @@ from phase12_predict_weekend import (
     fit_win_temperature,
     load_practice_pace,
     load_qualifying_grid,
+    load_race_results,
     load_weekend_roster,
     load_track_type,
     normalize_podium_probabilities,
@@ -478,3 +479,20 @@ def test_load_weekend_roster_prefers_qualifying_then_latest_practice(tmp_path):
     (base / "Q" / "results.csv").unlink()
     assert set(load_weekend_roster(2026, 15, tmp_path)) == {"A B", "X Y"}
     assert load_weekend_roster(2026, 16, tmp_path) is None
+
+
+def test_load_race_results_reads_real_results_and_ignores_empty(tmp_path):
+    round_dir = tmp_path / "2026" / "15_Azerbaijan_Grand_Prix" / "R"
+    round_dir.mkdir(parents=True)
+    pd.DataFrame({"FullName": ["A B", "C D"], "Position": [1.0, 2.0]}).to_csv(
+        round_dir / "results.csv", index=False
+    )
+    assert load_race_results(2026, 15, tmp_path) == {"A B": 1.0, "C D": 2.0}
+    assert load_race_results(2026, 16, tmp_path) is None
+
+    empty_dir = tmp_path / "2026" / "16_Bahrain_Grand_Prix" / "R"
+    empty_dir.mkdir(parents=True)
+    pd.DataFrame({"FullName": ["A B"], "Position": [None]}).to_csv(
+        empty_dir / "results.csv", index=False
+    )
+    assert load_race_results(2026, 16, tmp_path) is None
